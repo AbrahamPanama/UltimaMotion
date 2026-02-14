@@ -1,6 +1,6 @@
 'use client';
 
-import { Play, Pause } from 'lucide-react';
+import { Play, Pause, StepBack, StepForward } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Slider } from '../ui/slider';
 import {
@@ -25,6 +25,7 @@ interface PlayerControlsProps {
 }
 
 const PLAYBACK_RATES = [1.0, 0.5, 0.25, 0.125];
+const FRAME_STEP = 1 / 30; // Assume 30fps for stepping
 
 export default function PlayerControls({
   isPlaying,
@@ -64,6 +65,14 @@ export default function PlayerControls({
 
   const isOverlay = variant === 'overlay';
 
+  const handleStepBack = () => {
+    onSeek(Math.max(0, currentTime - FRAME_STEP));
+  };
+
+  const handleStepForward = () => {
+    onSeek(Math.min(duration, currentTime + FRAME_STEP));
+  };
+
   return (
     <div
       className={cn(
@@ -77,13 +86,33 @@ export default function PlayerControls({
         <Button
           variant="ghost"
           size="icon"
+          onClick={handleStepBack}
+          className={cn(isOverlay ? "hover:bg-white/20" : "hover:bg-accent")}
+          title="Previous Frame"
+        >
+          <StepBack className="h-5 w-5" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={onPlayPause}
           className={cn(isOverlay ? "hover:bg-white/20" : "hover:bg-accent")}
         >
           {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
         </Button>
 
-        <span className="text-xs font-mono w-12">{formatTime(currentTime)}</span>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleStepForward}
+          className={cn(isOverlay ? "hover:bg-white/20" : "hover:bg-accent")}
+          title="Next Frame"
+        >
+          <StepForward className="h-5 w-5" />
+        </Button>
+
+        <span className="text-xs font-mono w-12 text-center">{formatTime(currentTime)}</span>
 
         <Slider
           min={0}
@@ -94,7 +123,7 @@ export default function PlayerControls({
           className="w-full"
         />
 
-        <span className="text-xs font-mono w-12 text-right">{formatTime(duration)}</span>
+        <span className="text-xs font-mono w-12 text-center">{formatTime(duration)}</span>
 
         <Select
           value={playbackRate.toString()}

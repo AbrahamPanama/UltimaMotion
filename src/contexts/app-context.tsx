@@ -40,6 +40,11 @@ interface AppContextType {
   setActiveTileIndex: (index: number | null) => void;
 
   videoRefs: React.MutableRefObject<(HTMLVideoElement | null)[]>;
+  
+  zoomLevels: number[];
+  setZoomLevel: (index: number, scale: number) => void;
+  panPositions: {x: number, y: number}[];
+  setPanPosition: (index: number, position: {x: number, y: number}) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -56,6 +61,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [activeTileIndex, setActiveTileIndex] = useState<number | null>(0);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const { toast } = useToast();
+  
+  const [zoomLevels, setZoomLevels] = useState<number[]>(Array(MAX_SLOTS).fill(1));
+  const [panPositions, setPanPositions] = useState<{x: number, y: number}[]>(Array(MAX_SLOTS).fill({x: 0, y: 0}));
 
   const loadLibrary = useCallback(async () => {
     try {
@@ -156,6 +164,28 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     });
   }, []);
 
+  const setZoomLevel = (index: number, scale: number) => {
+    setZoomLevels(prev => {
+      if (isSyncEnabled) {
+        return prev.map(() => scale);
+      }
+      const newLevels = [...prev];
+      newLevels[index] = scale;
+      return newLevels;
+    });
+  };
+
+  const setPanPosition = (index: number, position: {x: number, y: number}) => {
+    setPanPositions(prev => {
+      if (isSyncEnabled) {
+        return prev.map(() => position);
+      }
+      const newPositions = [...prev];
+      newPositions[index] = position;
+      return newPositions;
+    });
+  };
+
   const value = {
     library,
     loadLibrary,
@@ -178,6 +208,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     activeTileIndex,
     setActiveTileIndex: handleSetActiveTileIndex,
     videoRefs,
+    zoomLevels,
+    setZoomLevel,
+    panPositions,
+    setPanPosition
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

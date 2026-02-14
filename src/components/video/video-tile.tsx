@@ -34,10 +34,15 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   } = useAppContext();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1.0);
+  const [scale, setScale] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const { toast } = useToast();
 
   // Handle ref assignment and cleanup
@@ -184,6 +189,71 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   };
 
 
+  // Zoom and Pan Handlers
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      // Zoom
+      const zoomSensitivity = 0.001;
+      const newScale = Math.min(Math.max(1, scale - e.deltaY * zoomSensitivity), 5);
+      setScale(newScale);
+      
+      // Reset position if zoomed out
+      if (newScale === 1) {
+        setPosition({ x: 0, y: 0 });
+      }
+    } else {
+      // Pan (if zoomed in)
+       if (scale > 1) {
+          const panSensitivity = 1;
+          const newX = position.x - e.deltaX * panSensitivity;
+          const newY = position.y - e.deltaY * panSensitivity;
+
+           // Calculate boundaries
+           const maxX = (containerRef.current?.offsetWidth || 0) * (scale - 1) / 2;
+           const maxY = (containerRef.current?.offsetHeight || 0) * (scale - 1) / 2;
+
+           setPosition({
+             x: Math.max(-maxX, Math.min(newX, maxX)),
+             y: Math.max(-maxY, Math.min(newY, maxY))
+           });
+       }
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (scale > 1) {
+      setIsDragging(true);
+      setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
+      e.stopPropagation(); // Prevent tile selection
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isDragging && scale > 1) {
+      const newX = e.clientX - dragStart.x;
+      const newY = e.clientY - dragStart.y;
+
+       // Calculate boundaries
+       const maxX = (containerRef.current?.offsetWidth || 0) * (scale - 1) / 2;
+       const maxY = (containerRef.current?.offsetHeight || 0) * (scale - 1) / 2;
+
+       setPosition({
+         x: Math.max(-maxX, Math.min(newX, maxX)),
+         y: Math.max(-maxY, Math.min(newY, maxY))
+       });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleMouseLeave = () => {
+    setIsDragging(false);
+  };
+
+
   if (!video) {
     return (
       <DropdownMenu>
@@ -218,24 +288,37 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         'relative bg-black rounded-lg overflow-hidden flex flex-col transition-all duration-300',
         isPortraitMode ? 'h-full aspect-[9/16]' : 'w-full h-full',
         isActive ? 'ring-4 ring-primary shadow-2xl' : 'ring-2 ring-transparent'
       )}
       onClick={() => setActiveTileIndex(index)}
+      onWheel={handleWheel}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
     >
-      <video
-        ref={videoRef}
-        src={video.url}
-        className={cn(
-          'w-full flex-1 min-h-0',
-          isPortraitMode ? 'object-cover' : 'object-contain'
-        )}
-        playsInline
-      />
+      <div className="flex-1 min-h-0 overflow-hidden relative">
+        <video
+          ref={videoRef}
+          src={video.url}
+          className={cn(
+            'w-full h-full',
+            isPortraitMode ? 'object-cover' : 'object-contain',
+             isDragging ? 'cursor-grabbing' : (scale > 1 ? 'cursor-grab' : 'cursor-default')
+          )}
+          style={{
+             transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
+             transition: isDragging ? 'none' : 'transform 0.1s ease-out'
+          }}
+          playsInline
+        />
+      </div>
       {/* Step buttons bar */}
-      <div className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-black/70" onClick={e => e.stopPropagation()}>
+      <div className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-black/70 z-10" onClick={e => e.stopPropagation()}>
         {renderStepBtn(-0.5, 32)}
         {renderStepBtn(-0.25, 26)}
         {renderStepBtn(-0.15, 20)}
@@ -244,17 +327,19 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
         {renderStepBtn(0.25, 26)}
         {renderStepBtn(0.5, 32)}
       </div>
-      <PlayerControls
-        isPlaying={isPlaying}
-        onPlayPause={handlePlayPause}
-        currentTime={currentTime}
-        duration={duration}
-        onSeek={handleSeek}
-        playbackRate={playbackRate}
-        onRateChange={handleRateChange}
-        isSyncEnabled={isSyncEnabled}
-        variant="static"
-      />
+      <div className="z-10 bg-black/70">
+          <PlayerControls
+            isPlaying={isPlaying}
+            onPlayPause={handlePlayPause}
+            currentTime={currentTime}
+            duration={duration}
+            onSeek={handleSeek}
+            playbackRate={playbackRate}
+            onRateChange={handleRateChange}
+            isSyncEnabled={isSyncEnabled}
+            variant="static"
+          />
+      </div>
     </div>
   );
 }
