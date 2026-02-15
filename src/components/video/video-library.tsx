@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Sidebar,
   SidebarContent,
@@ -27,6 +27,14 @@ export function VideoLibrary() {
   // State for Trim Dialog
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [isTrimOpen, setIsTrimOpen] = useState(false);
+  const [nextSegmentIndex, setNextSegmentIndex] = useState(0);
+
+  // When a new file is loaded, reset the segment counter
+  useEffect(() => {
+    if (pendingFile) {
+      setNextSegmentIndex(0);
+    }
+  }, [pendingFile]);
 
   const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -35,7 +43,6 @@ export function VideoLibrary() {
         toast({ title: 'Error', description: 'Please select a valid video file.', variant: 'destructive' });
         return;
       }
-      // Instead of saving immediately, open the Trim Dialog
       setPendingFile(file);
       setIsTrimOpen(true);
     }
@@ -60,6 +67,15 @@ export function VideoLibrary() {
 
     const duration = await getDuration(pendingFile);
 
+    // Append sequential number if user hasn't already (or just always append for clarity)
+    // The requirement says "dialog box with the name of the video and a sequential number at the end"
+    // Since we are passing 'name' from the dialog, we might want to ensure it has the index.
+    // However, the cleanest way is to just save it here.
+    
+    // If we want to force the name format "Video Name - Segment 0", we can do it here,
+    // or rely on the TrimDialog to have suggested it.
+    // Let's assume the user accepts the suggested name or edits it, and we just save it.
+    
     await addVideoToLibrary({
         name: name,
         blob: pendingFile,
@@ -68,9 +84,24 @@ export function VideoLibrary() {
         trimEnd,
     });
     
-    setPendingFile(null);
+    toast({ title: "Segment Saved", description: `${name} has been added to your library.` });
+
+    // Increment for next save
+    setNextSegmentIndex(prev => prev + 1);
+
+    // Do NOT close the dialog to allow more segments
+    // setPendingFile(null); 
+    // setIsTrimOpen(false);
   };
   
+  const handleDialogClose = (open: boolean) => {
+      setIsTrimOpen(open);
+      if (!open) {
+          // When closing, clear the pending file so we start fresh next time
+          setTimeout(() => setPendingFile(null), 300); // Small delay for animation
+      }
+  };
+
   const handleAddToGrid = (video: import('@/types').Video) => {
     const emptySlotIndex = slots.findIndex(slot => slot === null);
     if (emptySlotIndex !== -1) {
@@ -83,7 +114,7 @@ export function VideoLibrary() {
 
   return (
     <>
-      <Sidebar>
+      <Sidebar className="bg-[hsl(var(--sidebar-background))]">
         <SidebarHeader>
             <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold font-headline text-sidebar-foreground">Library</h2>
@@ -108,7 +139,7 @@ export function VideoLibrary() {
                             <p className="font-medium text-sm truncate w-full text-sidebar-foreground" title={video.name}>{video.name}</p>
                             <p className="text-xs text-sidebar-foreground/70">
                                 {new Date(video.createdAt).toLocaleDateString()} - {Math.round(video.duration)}s
-                                {video.trimStart !== undefined ? <span className="ml-1 text-accent font-semibold">(Trimmed)</span> : ''}
+                                {video.trimStart !== undefined ? <span className="ml-1 text-primary dark:text-accent font-semibold">(Trimmed)</span> : ''}
                             </p>
                             <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/menu-item:opacity-100 transition-opacity">
                                 <Button size="icon" variant="ghost" className="h-8 w-8 text-sidebar-foreground hover:text-sidebar-accent-foreground" onClick={() => handleAddToGrid(video)} title="Add to Grid">
@@ -143,9 +174,9 @@ export function VideoLibrary() {
 
       <TrimDialog 
         open={isTrimOpen} 
-        onOpenChange={setIsTrimOpen}
+        onOpenChange={handleDialogClose}
         blob={pendingFile}
-        initialName={pendingFile?.name || "New Video"}
+        initialName={pendingFile ? `${pendingFile.name.replace(/\.[^/.]+$/, "")} - Segment ${nextSegmentIndex}` : "New Video"}
         onSave={handleSaveTrimmed}
       />
     </>

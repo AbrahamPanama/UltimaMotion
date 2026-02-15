@@ -4,73 +4,111 @@
 
 @layer base {
   :root {
-    --background: 273 100% 92%;
-    --foreground: 270 20% 15%;
-    --card: 273 100% 95%;
-    --card-foreground: 270 20% 15%;
-    --popover: 273 100% 95%;
-    --popover-foreground: 270 20% 15%;
-    --primary: 273 69% 61%;
-    --primary-foreground: 273 100% 98%;
-    --secondary: 273 80% 88%;
-    --secondary-foreground: 270 20% 15%;
-    --muted: 273 80% 88%;
-    --muted-foreground: 270 10% 45%;
-    --accent: 255 56% 46%;
-    --accent-foreground: 0 0% 98%;
+    /* 
+      LIGHT MODE PALETTE 
+      Based on:
+      #486499 (Muted Blue) -> 219 36% 44%
+      #fff68d (Yellow)     -> 56 100% 77%
+      #ffffff (White)      -> 0 0% 100%
+      #2a2875 (Deep Blue)  -> 242 49% 31%
+      #e7ddd8 (Beige)      -> 20 22% 88%
+    */
+    --background: 0 0% 100%;       /* White */
+    --foreground: 242 49% 31%;     /* Deep Blue Text */
+
+    --card: 0 0% 100%;             /* White Card */
+    --card-foreground: 242 49% 31%; /* Deep Blue Text */
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 242 49% 31%;
+
+    --primary: 219 36% 44%;        /* Muted Blue */
+    --primary-foreground: 0 0% 100%; /* White Text */
+
+    --secondary: 20 22% 88%;       /* Beige */
+    --secondary-foreground: 242 49% 31%; /* Deep Blue Text */
+
+    --muted: 20 22% 92%;           /* Lightened Beige */
+    --muted-foreground: 242 30% 50%; /* Desaturated Blue Text */
+
+    --accent: 56 100% 77%;         /* Yellow */
+    --accent-foreground: 242 49% 31%; /* Deep Blue Text */
+
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 273 50% 80%;
-    --input: 273 50% 85%;
-    --ring: 273 69% 61%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+
+    --border: 20 22% 88%;          /* Beige Border */
+    --input: 20 22% 88%;           /* Beige Input */
+    --ring: 219 36% 44%;           /* Muted Blue Ring */
+
     --radius: 0.5rem;
-    --sidebar-background: 273 100% 95%;
-    --sidebar-foreground: 270 20% 15%;
-    --sidebar-primary: 255 56% 46%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 273 80% 88%;
-    --sidebar-accent-foreground: 270 20% 15%;
-    --sidebar-border: 273 50% 80%;
-    --sidebar-ring: 273 69% 61%;
+    
+    /* Charts can use variations of the palette */
+    --chart-1: 219 36% 44%; 
+    --chart-2: 242 49% 31%;
+    --chart-3: 56 100% 77%;
+    --chart-4: 20 22% 88%;
+    --chart-5: 242 30% 50%;
+
+    /* Sidebar - Beige in Light Mode */
+    --sidebar-background: 20 22% 92%; /* Using Lightened Beige */
+    --sidebar-foreground: 242 49% 31%;
+    --sidebar-primary: 219 36% 44%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 20 22% 88%; /* Slightly darker beige for hover */
+    --sidebar-accent-foreground: 242 49% 31%;
+    --sidebar-border: 20 22% 85%;
+    --sidebar-ring: 219 36% 44%;
   }
+
   .dark {
-    --background: 257 30% 12%;
-    --foreground: 273 100% 92%;
-    --card: 257 30% 15%;
-    --card-foreground: 273 100% 92%;
-    --popover: 257 30% 15%;
-    --popover-foreground: 273 100% 92%;
-    --primary: 273 69% 61%;
-    --primary-foreground: 273 100% 98%;
-    --secondary: 257 30% 20%;
-    --secondary-foreground: 273 100% 92%;
-    --muted: 257 30% 20%;
-    --muted-foreground: 273 20% 65%;
-    --accent: 255 66% 56%;
-    --accent-foreground: 0 0% 98%;
+    /* 
+      DARK MODE PALETTE REFINEMENT 
+      Using Deep Blue as base instead of generic gray/black.
+    */
+    --background: 242 49% 10%;     /* Very Dark Blue */
+    --foreground: 20 22% 88%;      /* Beige Text */
+
+    --card: 242 49% 12%;           /* Slightly Lighter Dark Blue */
+    --card-foreground: 20 22% 88%; /* Beige Text */
+
+    --popover: 242 49% 10%;
+    --popover-foreground: 20 22% 88%;
+
+    --primary: 219 36% 54%;        /* Lighter Muted Blue for Dark Mode */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 242 40% 20%;      /* Dark Blue/Gray */
+    --secondary-foreground: 20 22% 88%;
+
+    --muted: 242 40% 20%;
+    --muted-foreground: 219 20% 70%; /* Muted Blue-Gray Text */
+
+    --accent: 56 100% 77%;         /* Yellow remains same for pop */
+    --accent-foreground: 242 49% 31%; /* Dark Text on Yellow */
+
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    --border: 257 30% 25%;
-    --input: 257 30% 25%;
-    --ring: 273 69% 61%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
-    --sidebar-background: 257 30% 15%;
-    --sidebar-foreground: 273 100% 92%;
-    --sidebar-primary: 255 66% 56%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 257 30% 20%;
-    --sidebar-accent-foreground: 273 100% 92%;
-    --sidebar-border: 257 30% 25%;
-    --sidebar-ring: 255 66% 56%;
+
+    --border: 242 40% 20%;         /* Dark Blue Border */
+    --input: 242 40% 20%;
+    --ring: 219 36% 54%;
+    
+    --chart-1: 219 36% 54%;
+    --chart-2: 20 22% 88%;
+    --chart-3: 56 100% 77%;
+    --chart-4: 242 40% 40%;
+    --chart-5: 219 20% 70%;
+
+    /* Sidebar - Dark in Dark Mode */
+    --sidebar-background: 242 49% 12%; /* Matching card background */
+    --sidebar-foreground: 20 22% 88%;
+    --sidebar-primary: 219 36% 54%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 242 40% 20%;
+    --sidebar-accent-foreground: 20 22% 88%;
+    --sidebar-border: 242 40% 20%;
+    --sidebar-ring: 219 36% 54%;
   }
 }
 
@@ -81,4 +119,8 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+.font-headline {
+    font-family: var(--font-headline), sans-serif;
 }
