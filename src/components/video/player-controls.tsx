@@ -1,16 +1,17 @@
 'use client';
 
-import { Play, Pause, StepBack, StepForward } from 'lucide-react';
-import { Button } from '../ui/button';
-import { Slider } from '../ui/slider';
+import { Play, Pause, SkipBack, SkipForward } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '../ui/select';
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import React from 'react';
 
 interface PlayerControlsProps {
   isPlaying: boolean;
@@ -38,114 +39,135 @@ export default function PlayerControls({
   isSyncEnabled,
   variant = 'overlay',
 }: PlayerControlsProps) {
-
+  
+  // Format time as M:SS
   const formatTime = (time: number) => {
+    if (isNaN(time)) return "0:00";
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // In overlay mode, if sync is on, show the "Sync Active" badge instead of controls
-  if (isSyncEnabled && variant === 'overlay') {
-    return (
-      <div className="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-sm transition-opacity opacity-0 group-hover:opacity-100">
-        <p className="text-white font-medium text-lg">Sync Active</p>
-      </div>
-    );
-  }
-
-  // In static mode, if sync is on, show a compact label
-  if (isSyncEnabled && variant === 'static') {
-    return (
-      <div className="w-full py-1 px-2 bg-muted/50 text-center">
-        <p className="text-xs text-muted-foreground font-medium">Sync Active</p>
-      </div>
-    );
-  }
-
   const isOverlay = variant === 'overlay';
 
-  const handleStepBack = () => {
-    onSeek(Math.max(0, currentTime - FRAME_STEP));
-  };
+  // In sync mode, show a prominent badge/overlay
+  if (isSyncEnabled) {
+    return (
+      <div className={cn(
+        "flex items-center justify-center w-full",
+        isOverlay ? "absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity opacity-0 group-hover:opacity-100" : "py-2 bg-primary/10 rounded-md"
+      )}>
+        <div className="flex items-center gap-2 px-4 py-2 bg-primary/20 rounded-full border border-primary/30">
+             <div className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_8px_rgba(168,85,247,0.8)]" />
+             <span className="text-primary font-bold text-sm tracking-wide uppercase">Sync Active</span>
+        </div>
+      </div>
+    );
+  }
 
-  const handleStepForward = () => {
-    onSeek(Math.min(duration, currentTime + FRAME_STEP));
+  const handleSeekChange = (value: number[]) => {
+    onSeek(value[0]);
   };
+  
+  const handleStepBack = (e: React.MouseEvent) => { e.stopPropagation(); onSeek(Math.max(0, currentTime - FRAME_STEP)); };
+  const handleStepForward = (e: React.MouseEvent) => { e.stopPropagation(); onSeek(Math.min(duration, currentTime + FRAME_STEP)); };
+  const handleSkipBack = (e: React.MouseEvent) => { e.stopPropagation(); onSeek(Math.max(0, currentTime - 5)); };
+  const handleSkipForward = (e: React.MouseEvent) => { e.stopPropagation(); onSeek(Math.min(duration, currentTime + 5)); };
+  
+  const handlePlayClick = (e: React.MouseEvent) => { e.stopPropagation(); onPlayPause(); };
+
 
   return (
     <div
       className={cn(
-        "flex flex-col gap-2",
-        isOverlay
-          ? "absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-          : "w-full"
+        "w-full flex flex-col gap-2 transition-opacity duration-200",
+        isOverlay ? "opacity-0 group-hover:opacity-100" : ""
       )}
+      onClick={(e) => e.stopPropagation()}
     >
-      <div className={cn("flex items-center gap-2", isOverlay ? "text-white" : "text-foreground")}>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleStepBack}
-          className={cn(isOverlay ? "hover:bg-white/20" : "hover:bg-accent")}
-          title="Previous Frame"
-        >
-          <StepBack className="h-5 w-5" />
-        </Button>
+        {/* Progress Bar Row */}
+        <div className="flex items-center gap-3 px-1">
+             <span className="text-xs font-mono font-medium text-white/90 w-[35px] text-right tabular-nums shadow-black/50 drop-shadow-sm">
+                {formatTime(currentTime)}
+             </span>
+             
+             <div className="flex-1 relative group/slider py-2 cursor-pointer">
+                <Slider
+                    value={[currentTime]}
+                    min={0}
+                    max={duration || 100}
+                    step={0.01}
+                    onValueChange={handleSeekChange}
+                    className="cursor-pointer"
+                />
+             </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onPlayPause}
-          className={cn(isOverlay ? "hover:bg-white/20" : "hover:bg-accent")}
-        >
-          {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-        </Button>
+             <span className="text-xs font-mono font-medium text-white/70 w-[35px] tabular-nums shadow-black/50 drop-shadow-sm">
+                {formatTime(duration)}
+             </span>
+        </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleStepForward}
-          className={cn(isOverlay ? "hover:bg-white/20" : "hover:bg-accent")}
-          title="Next Frame"
-        >
-          <StepForward className="h-5 w-5" />
-        </Button>
+        {/* Controls Row */}
+        <div className="flex items-center justify-between px-1">
+            
+            {/* Playback Controls Group */}
+            <div className="flex items-center gap-1">
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/20 rounded-full transition-colors"
+                    onClick={handleSkipBack}
+                    title="-5s"
+                >
+                    <SkipBack className="h-4 w-4 fill-current" />
+                </Button>
+                
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-white hover:text-white hover:bg-white/20 rounded-full transition-colors"
+                    onClick={handlePlayClick}
+                >
+                    {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current ml-0.5" />}
+                </Button>
 
-        <span className="text-xs font-mono w-12 text-center">{formatTime(currentTime)}</span>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/20 rounded-full transition-colors"
+                    onClick={handleSkipForward}
+                    title="+5s"
+                >
+                    <SkipForward className="h-4 w-4 fill-current" />
+                </Button>
+            </div>
 
-        <Slider
-          min={0}
-          max={duration || 1}
-          step={0.1}
-          value={[currentTime]}
-          onValueChange={(value) => onSeek(value[0])}
-          className="w-full"
-        />
-
-        <span className="text-xs font-mono w-12 text-center">{formatTime(duration)}</span>
-
-        <Select
-          value={playbackRate.toString()}
-          onValueChange={(value) => onRateChange(parseFloat(value))}
-        >
-          <SelectTrigger
-            className={cn(
-              "w-[80px] h-8",
-              isOverlay
-                ? "bg-black/30 border-white/30 text-white"
-                : "bg-background border-input text-foreground"
-            )}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PLAYBACK_RATES.map((rate) => (
-              <SelectItem key={rate} value={rate.toString()}>{rate.toFixed(2)}x</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+            {/* Right Side Controls */}
+             <div className="flex items-center gap-2">
+                 {/* Playback Speed Selector */}
+                 <Select
+                    value={playbackRate.toString()}
+                    onValueChange={(val) => onRateChange(parseFloat(val))}
+                  >
+                    <SelectTrigger 
+                        className="h-7 w-[70px] bg-black/60 border-white/20 text-white hover:bg-black/80 hover:border-white/40 transition-colors focus:ring-0 focus:ring-offset-0"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="end" className="min-w-[80px] bg-black/90 text-white border-white/20">
+                      {PLAYBACK_RATES.map((rate) => (
+                        <SelectItem 
+                            key={rate} 
+                            value={rate.toString()} 
+                            className="text-xs focus:bg-white/20 focus:text-white text-white/80"
+                        >
+                          {rate}x
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+             </div>
+        </div>
     </div>
   );
 }

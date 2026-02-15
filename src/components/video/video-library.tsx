@@ -86,11 +86,11 @@ export function VideoLibrary() {
       <Sidebar>
         <SidebarHeader>
             <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold font-headline">Library</h2>
+            <h2 className="text-xl font-bold font-headline text-sidebar-foreground">Library</h2>
             <SidebarTrigger />
             </div>
             <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" className="w-full" onClick={() => fileInputRef.current?.click()}>
+                <Button variant="outline" className="w-full text-foreground" onClick={() => fileInputRef.current?.click()}>
                 <FilePlus className="mr-2"/> Import
                 </Button>
                 <input type="file" ref={fileInputRef} onChange={handleFileImport} accept="video/*" className="hidden" />
@@ -104,17 +104,17 @@ export function VideoLibrary() {
                 <SidebarMenu>
                     {library.map((video) => (
                     <SidebarMenuItem key={video.id}>
-                        <div className="group/menu-item relative flex flex-col items-start p-2 rounded-md hover:bg-sidebar-accent w-full text-left">
-                            <p className="font-medium text-sm truncate w-full" title={video.name}>{video.name}</p>
+                        <div className="group/menu-item relative flex flex-col items-start p-2 rounded-md hover:bg-sidebar-accent w-full text-left cursor-pointer">
+                            <p className="font-medium text-sm truncate w-full text-sidebar-foreground" title={video.name}>{video.name}</p>
                             <p className="text-xs text-sidebar-foreground/70">
                                 {new Date(video.createdAt).toLocaleDateString()} - {Math.round(video.duration)}s
                                 {video.trimStart !== undefined ? <span className="ml-1 text-accent font-semibold">(Trimmed)</span> : ''}
                             </p>
                             <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/menu-item:opacity-100 transition-opacity">
-                                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => handleAddToGrid(video)}>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-sidebar-foreground hover:text-sidebar-accent-foreground" onClick={() => handleAddToGrid(video)} title="Add to Grid">
                                     <PlusCircle className="h-4 w-4" />
                                 </Button>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => removeVideoFromLibrary(video.id)}>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive/90" onClick={() => removeVideoFromLibrary(video.id)} title="Delete Video">
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
                             </div>
@@ -125,7 +125,7 @@ export function VideoLibrary() {
                 ) : (
                     <div className="flex flex-col items-center justify-center h-full p-4 text-center">
                         <Video className="w-16 h-16 text-muted-foreground/50 mb-4"/>
-                        <h3 className="font-bold">Your Library is Empty</h3>
+                        <h3 className="font-bold text-sidebar-foreground">Your Library is Empty</h3>
                         <p className="text-sm text-muted-foreground">Import or record a video to get started.</p>
                     </div>
                 )}
@@ -134,8 +134,8 @@ export function VideoLibrary() {
         <SidebarFooter>
             <Card className="bg-transparent border-dashed">
                 <CardHeader>
-                    <CardTitle className="text-base">Pro Tip</CardTitle>
-                    <CardDescription className="text-xs">Use Cmd/Ctrl + B to toggle the library sidebar.</CardDescription>
+                    <CardTitle className="text-base text-sidebar-foreground">Pro Tip</CardTitle>
+                    <CardDescription className="text-xs text-muted-foreground">Use Cmd/Ctrl + B to toggle the library sidebar.</CardDescription>
                 </CardHeader>
             </Card>
         </SidebarFooter>

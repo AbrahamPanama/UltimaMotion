@@ -30,6 +30,8 @@ export function TrimDialog({ open, onOpenChange, blob, initialName, onSave }: Tr
   const [range, setRange] = useState([0, 0]); // [start, end]
   const [name, setName] = useState(initialName);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [thumbnails, setThumbnails] = useState<string[]>([]);
+  const [isGeneratingThumbnails, setIsGeneratingThumbnails] = useState(false);
 
   // Initialize video URL and Duration
   useEffect(() => {
@@ -41,10 +43,75 @@ export function TrimDialog({ open, onOpenChange, blob, initialName, onSave }: Tr
       setRange([0, 0]);
       setIsPlaying(false);
       setName(initialName);
+      setThumbnails([]);
 
       return () => URL.revokeObjectURL(url);
     }
   }, [blob, initialName]);
+
+  // Generate Thumbnails
+  useEffect(() => {
+    if (!blob) return;
+
+    const generateThumbnails = async () => {
+      setIsGeneratingThumbnails(true);
+      const thumbs: string[] = [];
+      const url = URL.createObjectURL(blob);
+      const video = document.createElement('video');
+      video.src = url;
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = "anonymous";
+      
+      // Wait for metadata to get duration
+      await new Promise((resolve) => {
+        video.onloadedmetadata = () => resolve(true);
+        video.onerror = () => resolve(true); // Fail gracefully
+      });
+
+      const vidDuration = video.duration;
+      if (!vidDuration || !isFinite(vidDuration)) {
+        URL.revokeObjectURL(url);
+        setIsGeneratingThumbnails(false);
+        return;
+      }
+
+      const count = 10;
+      const interval = vidDuration / count;
+
+      try {
+        for (let i = 0; i < count; i++) {
+          const time = i * interval; // Start of segment
+          video.currentTime = time;
+          
+          await new Promise((resolve) => {
+            video.onseeked = () => resolve(true);
+            // Timeout safety
+            setTimeout(resolve, 500);
+          });
+
+          const canvas = document.createElement('canvas');
+          // Use a reasonable thumbnail size
+          canvas.width = 160; 
+          canvas.height = 90; 
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            // Draw video frame to canvas
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            thumbs.push(canvas.toDataURL('image/jpeg', 0.6));
+          }
+        }
+      } catch (e) {
+        console.error("Error generating thumbnails:", e);
+      }
+
+      setThumbnails(thumbs);
+      URL.revokeObjectURL(url);
+      setIsGeneratingThumbnails(false);
+    };
+
+    generateThumbnails();
+  }, [blob]);
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
@@ -105,7 +172,7 @@ export function TrimDialog({ open, onOpenChange, blob, initialName, onSave }: Tr
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] bg-card">
+      <DialogContent className="sm:max-w-[800px] bg-card">
         <DialogHeader>
           <DialogTitle>Review & Trim</DialogTitle>
           <DialogDescription>
@@ -113,7 +180,7 @@ export function TrimDialog({ open, onOpenChange, blob, initialName, onSave }: Tr
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-6">
           {/* Player Container */}
           <div className="relative aspect-video bg-black rounded-md overflow-hidden border border-border">
             {videoUrl && (
@@ -142,17 +209,41 @@ export function TrimDialog({ open, onOpenChange, blob, initialName, onSave }: Tr
               <span>{range[1].toFixed(2)}s</span>
             </div>
             
-            <Slider
-              value={range}
-              min={0}
-              max={duration}
-              step={0.05}
-              minStepsBetweenThumbs={1}
-              onValueChange={handleSliderChange}
-              className="py-4"
-            />
+            {/* Film Strip Slider */}
+            <div className="relative h-16 w-full rounded-md overflow-hidden group">
+               {/* Thumbnails Background */}
+               <div className="absolute inset-0 flex w-full h-full bg-secondary/20">
+                 {thumbnails.map((thumb, idx) => (
+                   <div key={idx} className="flex-1 h-full overflow-hidden relative border-r border-white/10 last:border-r-0">
+                     <img 
+                        src={thumb} 
+                        alt={`frame-${idx}`} 
+                        className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" 
+                     />
+                   </div>
+                 ))}
+                 {thumbnails.length === 0 && isGeneratingThumbnails && (
+                   <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                     Generating preview...
+                   </div>
+                 )}
+               </div>
 
-            <div className="flex items-center gap-2">
+               {/* Slider Overlay */}
+               <div className="absolute inset-0">
+                <Slider
+                    value={range}
+                    min={0}
+                    max={duration}
+                    step={0.05}
+                    minStepsBetweenThumbs={1}
+                    onValueChange={handleSliderChange}
+                    className="h-full py-0 [&>span:first-child]:h-full [&>span:first-child]:bg-transparent [&>span:first-child]:rounded-none"
+                  />
+               </div>
+            </div>
+
+            <div className="flex items-center gap-2 mt-2">
                <Button size="sm" variant="secondary" onClick={handleAutoTrim} className="text-xs">
                  <Wand2 className="w-3.5 h-3.5 mr-2" />
                  Auto-Trim

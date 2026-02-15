@@ -3,81 +3,133 @@ import { useAppContext } from '@/contexts/app-context';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Square, Rows, Grid, RadioTower, Smartphone, Repeat, Volume2, VolumeX } from 'lucide-react';
+import { LayoutGrid, Square, Rows, Smartphone, Repeat, Radio, Volume2, VolumeX } from 'lucide-react';
 
 export default function MainControls() {
-  const { layout, setLayout, isSyncEnabled, toggleSync, isPortraitMode, togglePortraitMode, isLoopEnabled, toggleLoop, isMuted, toggleMute } = useAppContext();
+  const { 
+    setLayout, 
+    layout,
+    isSyncEnabled, 
+    toggleSync, 
+    isPortraitMode, 
+    togglePortraitMode, 
+    isLoopEnabled, 
+    toggleLoop, 
+    isMuted, 
+    toggleMute 
+  } = useAppContext();
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-2 border rounded-lg bg-card">
-      <div className="flex items-center gap-2">
-        <Label>Layout:</Label>
-        <Button
-          variant={layout === 1 ? 'default' : 'ghost'}
-          size="icon"
-          onClick={() => setLayout(1)}
-        >
-          <Square className="h-5 w-5" />
-          <span className="sr-only">1 Tile Layout</span>
-        </Button>
-        <Button
-          variant={layout === 2 ? 'default' : 'ghost'}
-          size="icon"
-          onClick={() => setLayout(2)}
-        >
-          <Rows className="h-5 w-5" />
-          <span className="sr-only">2 Tile Layout</span>
-        </Button>
-        <Button
-          variant={layout === 4 ? 'default' : 'ghost'}
-          size="icon"
-          onClick={() => setLayout(4)}
-        >
-          <Grid className="h-5 w-5" />
-          <span className="sr-only">4 Tile Layout</span>
-        </Button>
-      </div>
-      <div className="flex items-center gap-4">
-        <Button
-          variant={isMuted ? 'default' : 'ghost'}
-          size="icon"
-          onClick={toggleMute}
-          title={isMuted ? 'Unmute audio' : 'Mute audio'}
-        >
-          {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-        </Button>
-        <div className="flex items-center space-x-2">
-          <Repeat className="h-5 w-5 text-muted-foreground" />
-          <Label htmlFor="loop-mode" className="font-medium">
-            Loop
-          </Label>
-          <Switch
-            id="loop-mode"
-            checked={isLoopEnabled}
-            onCheckedChange={toggleLoop}
-          />
+    <div className="w-full max-w-4xl mx-auto p-4 bg-card/80 backdrop-blur-md border border-border/50 rounded-xl shadow-sm space-y-4">
+      
+      {/* Top Row: Layout & Global Toggles */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+        
+        {/* Layout Selectors */}
+        <div className="flex items-center gap-2 bg-secondary/30 p-1 rounded-lg">
+          <Button
+            variant={layout === 1 ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setLayout(1)}
+            className="w-10 h-8"
+            title="Single View"
+          >
+            <Square className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={layout === 2 ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setLayout(2)}
+            className="w-10 h-8"
+            title="Split View"
+          >
+            <Rows className="h-4 w-4 rotate-90 sm:rotate-0" />
+          </Button>
+          <Button
+            variant={layout === 4 ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setLayout(4)}
+            className="w-10 h-8"
+            title="Grid View"
+          >
+            <LayoutGrid className="h-4 w-4" />
+          </Button>
         </div>
-        <div className="flex items-center space-x-2">
-          <Smartphone className="h-5 w-5 text-muted-foreground" />
-          <Label htmlFor="portrait-mode" className="font-medium">
-            Portrait
-          </Label>
-          <Switch
-            id="portrait-mode"
-            checked={isPortraitMode}
-            onCheckedChange={togglePortraitMode}
-          />
-        </div>
-        <div className="flex items-center space-x-2">
-          <RadioTower className="h-5 w-5 text-muted-foreground" />
-          <Label htmlFor="sync-mode" className="font-medium">
-            Sync Playback
-          </Label>
-          <Switch
-            id="sync-mode"
-            checked={isSyncEnabled}
-            onCheckedChange={toggleSync}
-          />
+
+        <div className="h-6 w-px bg-border hidden sm:block" />
+
+        {/* Global Controls */}
+        <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
+          
+          {/* Mute Toggle */}
+           <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggleMute}
+            className={`gap-2 ${isMuted ? 'text-destructive hover:text-destructive/90' : 'text-foreground'}`}
+            title={isMuted ? 'Unmute all' : 'Mute all'}
+          >
+            {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            <span className="hidden sm:inline text-sm font-medium">{isMuted ? 'Muted' : 'Sound'}</span>
+          </Button>
+
+           {/* Loop Toggle */}
+          <div className="flex items-center gap-2">
+             <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleLoop}
+                className={`gap-2 ${isLoopEnabled ? 'text-primary' : 'text-muted-foreground'}`}
+             >
+                <Repeat className="h-4 w-4" />
+                <span className="text-sm font-medium">Loop</span>
+             </Button>
+             <Switch
+                id="loop-mode"
+                checked={isLoopEnabled}
+                onCheckedChange={toggleLoop}
+                className="scale-75"
+             />
+          </div>
+
+          {/* Portrait Toggle */}
+          <div className="flex items-center gap-2">
+             <Button
+                variant="ghost"
+                size="sm"
+                onClick={togglePortraitMode}
+                className={`gap-2 ${isPortraitMode ? 'text-primary' : 'text-muted-foreground'}`}
+             >
+                <Smartphone className="h-4 w-4" />
+                <span className="text-sm font-medium">Portrait</span>
+             </Button>
+             <Switch
+                id="portrait-mode"
+                checked={isPortraitMode}
+                onCheckedChange={togglePortraitMode}
+                 className="scale-75"
+             />
+          </div>
+
+          {/* Sync Toggle */}
+          <div className="flex items-center gap-2 pl-2 border-l border-border/50">
+             <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleSync}
+                className={`gap-2 ${isSyncEnabled ? 'text-primary' : 'text-muted-foreground'}`}
+             >
+                <Radio className={`h-4 w-4 ${isSyncEnabled ? 'animate-pulse' : ''}`} />
+                <span className="text-sm font-medium">Sync</span>
+             </Button>
+             <Switch
+                id="sync-mode"
+                checked={isSyncEnabled}
+                onCheckedChange={toggleSync}
+                 className="scale-75"
+             />
+          </div>
+
         </div>
       </div>
     </div>
