@@ -7,4 +7,5 @@ export type Video = {
   createdAt: Date;
   trimStart?: number; // New: Start time in seconds
   trimEnd?: number;   // New: End time in seconds
+  thumbnail?: string; // New: Base64 data URL for thumbnail
 };

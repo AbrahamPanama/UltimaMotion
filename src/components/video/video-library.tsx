@@ -53,45 +53,70 @@ export function VideoLibrary() {
   const handleSaveTrimmed = async (name: string, trimStart: number, trimEnd: number) => {
     if (!pendingFile) return;
     
-    const getDuration = (file: File): Promise<number> => {
+    // Helper to get duration and generate a thumbnail
+    const processVideo = (file: File): Promise<{duration: number, thumbnail: string}> => {
         return new Promise((resolve) => {
             const v = document.createElement('video');
             v.preload = 'metadata';
+            v.muted = true;
+            v.playsInline = true;
+            
+            // Wait for metadata to be ready
             v.onloadedmetadata = () => {
-                resolve(v.duration);
-                URL.revokeObjectURL(v.src);
+                // Seek to the start frame of the trim
+                // Note: Seeking might need a moment to buffer the frame
+                v.currentTime = trimStart; 
             };
+            
+            // Once seeking is done, we can capture the frame
+            v.onseeked = () => {
+                const duration = v.duration;
+                
+                // Generate thumbnail
+                const canvas = document.createElement('canvas');
+                // Use a reasonable size for the library thumbnail (e.g., 320px width)
+                // Maintain aspect ratio
+                const scale = 320 / v.videoWidth;
+                canvas.width = 320;
+                canvas.height = v.videoHeight * scale;
+                
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+                    const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
+                    
+                    resolve({ duration, thumbnail });
+                } else {
+                    resolve({ duration, thumbnail: '' }); // Fallback
+                }
+                // Cleanup
+                // URL.revokeObjectURL(v.src); // Do this after resolving?
+            };
+            
+            // Error handling
+            v.onerror = () => {
+                resolve({ duration: 0, thumbnail: '' });
+            };
+            
             v.src = URL.createObjectURL(file);
         });
     };
 
-    const duration = await getDuration(pendingFile);
+    const { duration, thumbnail } = await processVideo(pendingFile);
 
-    // Append sequential number if user hasn't already (or just always append for clarity)
-    // The requirement says "dialog box with the name of the video and a sequential number at the end"
-    // Since we are passing 'name' from the dialog, we might want to ensure it has the index.
-    // However, the cleanest way is to just save it here.
-    
-    // If we want to force the name format "Video Name - Segment 0", we can do it here,
-    // or rely on the TrimDialog to have suggested it.
-    // Let's assume the user accepts the suggested name or edits it, and we just save it.
-    
     await addVideoToLibrary({
         name: name,
         blob: pendingFile,
         duration: duration,
         trimStart,
         trimEnd,
+        thumbnail, // Save the generated thumbnail
     });
     
     toast({ title: "Segment Saved", description: `${name} has been added to your library.` });
 
     // Increment for next save
     setNextSegmentIndex(prev => prev + 1);
-
-    // Do NOT close the dialog to allow more segments
-    // setPendingFile(null); 
-    // setIsTrimOpen(false);
   };
   
   const handleDialogClose = (open: boolean) => {
@@ -135,19 +160,57 @@ export function VideoLibrary() {
                 <SidebarMenu>
                     {library.map((video) => (
                     <SidebarMenuItem key={video.id}>
-                        <div className="group/menu-item relative flex flex-col items-start p-2 rounded-md hover:bg-sidebar-accent w-full text-left cursor-pointer">
-                            <p className="font-medium text-sm truncate w-full text-sidebar-foreground" title={video.name}>{video.name}</p>
-                            <p className="text-xs text-sidebar-foreground/70">
-                                {new Date(video.createdAt).toLocaleDateString()} - {Math.round(video.duration)}s
-                                {video.trimStart !== undefined ? <span className="ml-1 text-primary dark:text-accent font-semibold">(Trimmed)</span> : ''}
-                            </p>
-                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/menu-item:opacity-100 transition-opacity">
-                                <Button size="icon" variant="ghost" className="h-8 w-8 text-sidebar-foreground hover:text-sidebar-accent-foreground" onClick={() => handleAddToGrid(video)} title="Add to Grid">
-                                    <PlusCircle className="h-4 w-4" />
-                                </Button>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive/90" onClick={() => removeVideoFromLibrary(video.id)} title="Delete Video">
-                                    <Trash2 className="h-4 w-4" />
-                                </Button>
+                        <div 
+                          className="group/menu-item relative flex flex-col items-start p-2 rounded-md hover:bg-sidebar-accent w-full text-left cursor-pointer transition-colors"
+                          onClick={() => handleAddToGrid(video)}
+                        >
+                            {/* Thumbnail Container */}
+                            <div className="w-full aspect-video bg-black/10 rounded-md mb-2 overflow-hidden border border-border/20 relative shadow-sm">
+                                {video.thumbnail ? (
+                                    <img src={video.thumbnail} alt={video.name} className="w-full h-full object-cover" />
+                                ) : (
+                                    <div className="flex items-center justify-center h-full w-full bg-secondary/50">
+                                        <Video className="w-8 h-8 text-muted-foreground/50"/>
+                                    </div>
+                                )}
+                                {/* Hover Overlay */}
+                                <div className="absolute inset-0 bg-black/0 group-hover/menu-item:bg-black/10 transition-colors pointer-events-none" />
+                                
+                                {/* Quick Actions Overlay (Visible on Hover) */}
+                                <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover/menu-item:opacity-100 transition-opacity bg-black/60 rounded-md p-1 backdrop-blur-sm shadow-md pointer-events-auto">
+                                    <Button 
+                                      size="icon" 
+                                      variant="ghost" 
+                                      className="h-6 w-6 text-white hover:text-white hover:bg-white/20" 
+                                      onClick={(e) => { e.stopPropagation(); handleAddToGrid(video); }} 
+                                      title="Add to Grid"
+                                    >
+                                        <PlusCircle className="h-4 w-4" />
+                                    </Button>
+                                    <Button 
+                                      size="icon" 
+                                      variant="ghost" 
+                                      className="h-6 w-6 text-red-400 hover:text-red-300 hover:bg-white/20" 
+                                      onClick={(e) => { e.stopPropagation(); removeVideoFromLibrary(video.id); }} 
+                                      title="Delete Video"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div className="w-full min-w-0">
+                                <p className="font-medium text-sm truncate text-sidebar-foreground" title={video.name}>{video.name}</p>
+                                <p className="text-xs text-sidebar-foreground/70 flex items-center gap-1 mt-0.5">
+                                    {Math.round(video.duration)}s
+                                    <span className="w-0.5 h-0.5 rounded-full bg-current opacity-50" />
+                                    {new Date(video.createdAt).toLocaleDateString()}
+                                </p>
+                                {video.trimStart !== undefined && (
+                                  <p className="text-[10px] text-primary dark:text-accent font-semibold mt-1 uppercase tracking-wider opacity-90">
+                                    Trimmed
+                                  </p>
+                                )}
                             </div>
                         </div>
                     </SidebarMenuItem>

@@ -83,15 +83,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const addVideoToLibrary = async (videoData: Omit<Video, 'id' | 'url' | 'createdAt'>) => {
     try {
+      const id = crypto.randomUUID();
       const newVideo: Video = {
         ...videoData,
-        id: crypto.randomUUID(),
+        id,
         url: URL.createObjectURL(videoData.blob),
         createdAt: new Date(),
       };
+      
+      // Save to IndexedDB
       await addVideoDB(newVideo);
+      
+      // Update state
       setLibrary(prev => [...prev, newVideo]);
-      toast({ title: "Video Saved", description: `"${newVideo.name}" has been added to your library.` });
+      // toast({ title: "Video Saved", description: `"${newVideo.name}" has been added to your library.` }); // Toast handled by caller for more context
     } catch (error) {
       console.error('Failed to add video:', error);
       toast({ title: "Error", description: "Could not save video.", variant: "destructive" });
@@ -120,20 +125,36 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (index >= 0 && index < MAX_SLOTS) {
         newSlots[index] = video;
       }
-      // Auto-expand layout to show all filled slots
+      
+      // Auto-expand layout logic
       if (video !== null) {
+        // Count how many slots will be filled after this update
         const filledCount = newSlots.filter(s => s !== null).length;
-        const newLayout = filledCount <= 1 ? 1 : filledCount <= 2 ? 2 : 4;
-        if (newLayout > layout) {
-          setLayout(newLayout as Layout);
+        
+        // If we are adding a video, ensure layout is big enough
+        // Current layout vs needed layout
+        // 1 video -> layout 1
+        // 2 videos -> layout 2
+        // 3-4 videos -> layout 4
+        
+        let requiredLayout: Layout = 1;
+        if (filledCount > 2) requiredLayout = 4;
+        else if (filledCount > 1) requiredLayout = 2;
+        
+        // Only expand, don't shrink automatically
+        if (requiredLayout > layout) {
+            setLayout(requiredLayout);
         }
       }
       return newSlots;
     });
+
     // Reset sync offset when a new video is loaded into a slot
     setSyncOffsets(prev => {
       const newOffsets = [...prev];
-      newOffsets[index] = 0;
+      if (index >= 0 && index < MAX_SLOTS) {
+          newOffsets[index] = 0;
+      }
       return newOffsets;
     });
   };
