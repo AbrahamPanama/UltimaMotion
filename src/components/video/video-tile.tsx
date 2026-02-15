@@ -177,12 +177,12 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     }
   };
 
-  const renderStepBtn = (seconds: number, size: number) => {
+  const renderStepBtn = (seconds: number, size: number, labelOverride?: string) => {
     const isNeg = seconds < 0;
-    const label = `${isNeg ? '' : '+'}${seconds}s`;
+    const label = labelOverride || `${isNeg ? '' : '+'}${seconds}s`;
     return (
       <button
-        key={seconds}
+        key={label}
         onClick={(e) => { e.stopPropagation(); handleStep(seconds); }}
         className="flex-shrink-0 text-white/90 hover:text-white hover:scale-110 active:scale-90 transition-all focus:outline-none focus:ring-1 focus:ring-white/50 rounded-full"
         title={label}
@@ -422,7 +422,9 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
         >
           {renderStepBtn(-0.5, 28)}
           {renderStepBtn(-0.1, 28)}
+          {renderStepBtn(-1/30, 28, '-1f')}
           <div className="w-px h-4 bg-white/20 mx-1" />
+          {renderStepBtn(1/30, 28, '+1f')}
           {renderStepBtn(0.1, 28)}
           {renderStepBtn(0.5, 28)}
         </div>
