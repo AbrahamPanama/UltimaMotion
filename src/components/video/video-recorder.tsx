@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -29,6 +29,16 @@ export function VideoRecorder() {
 
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [showTrimDialog, setShowTrimDialog] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(false);
+
+  // Detect device orientation
+  useEffect(() => {
+    const mql = window.matchMedia('(orientation: portrait)');
+    setIsPortrait(mql.matches);
+    const handler = (e: MediaQueryListEvent) => setIsPortrait(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach(track => track.stop());
@@ -166,8 +176,8 @@ export function VideoRecorder() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="relative aspect-video w-full bg-muted rounded-md overflow-hidden">
-            <video ref={videoPreviewRef} playsInline autoPlay muted className="w-full h-full object-cover"></video>
+          <div className={`relative w-full bg-muted rounded-md overflow-hidden ${isPortrait ? 'aspect-[9/16] max-h-[50vh]' : 'aspect-video'}`}>
+            <video ref={videoPreviewRef} playsInline autoPlay muted className="w-full h-full object-contain"></video>
             {/* Camera flip button */}
             <Button
               variant="secondary"
