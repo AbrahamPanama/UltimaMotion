@@ -6,6 +6,7 @@ import { FilePlus, Trash2, PlusCircle, Video, ChevronUp, ChevronDown } from 'luc
 import { useToast } from '@/hooks/use-toast';
 import { VideoRecorder } from './video-recorder';
 import { TrimDialog } from './trim-dialog';
+import { extractThumbnail } from '@/lib/video-utils';
 
 export function MobileLibrary() {
   const { library, addVideoToLibrary, removeVideoFromLibrary, setSlot, slots } = useAppContext();
@@ -43,38 +44,7 @@ export function MobileLibrary() {
   const handleSaveTrimmed = async (name: string, trimStart: number, trimEnd: number) => {
     if (!pendingFile) return;
 
-    const processVideo = (file: File): Promise<{ duration: number; thumbnail: string }> => {
-      return new Promise((resolve) => {
-        const v = document.createElement('video');
-        v.preload = 'metadata';
-        v.muted = true;
-        v.playsInline = true;
-        v.onloadedmetadata = () => {
-          v.currentTime = trimStart;
-        };
-        v.onseeked = () => {
-          const duration = v.duration;
-          const canvas = document.createElement('canvas');
-          const scale = 320 / v.videoWidth;
-          canvas.width = 320;
-          canvas.height = v.videoHeight * scale;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-            const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
-            resolve({ duration, thumbnail });
-          } else {
-            resolve({ duration, thumbnail: '' });
-          }
-        };
-        v.onerror = () => {
-          resolve({ duration: 0, thumbnail: '' });
-        };
-        v.src = URL.createObjectURL(file);
-      });
-    };
-
-    const { duration, thumbnail } = await processVideo(pendingFile);
+    const { duration, thumbnail } = await extractThumbnail(pendingFile, trimStart);
 
     await addVideoToLibrary({
       name,

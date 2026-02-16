@@ -13,6 +13,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAppContext } from '@/contexts/app-context';
+import { extractThumbnail } from '@/lib/video-utils';
 import { FilePlus, Trash2, PlusCircle, Video } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { VideoRecorder } from './video-recorder';
@@ -53,56 +54,7 @@ export function VideoLibrary() {
   const handleSaveTrimmed = async (name: string, trimStart: number, trimEnd: number) => {
     if (!pendingFile) return;
 
-    // Helper to get duration and generate a thumbnail
-    const processVideo = (file: File): Promise<{ duration: number, thumbnail: string }> => {
-      return new Promise((resolve) => {
-        const v = document.createElement('video');
-        v.preload = 'metadata';
-        v.muted = true;
-        v.playsInline = true;
-
-        // Wait for metadata to be ready
-        v.onloadedmetadata = () => {
-          // Seek to the start frame of the trim
-          // Note: Seeking might need a moment to buffer the frame
-          v.currentTime = trimStart;
-        };
-
-        // Once seeking is done, we can capture the frame
-        v.onseeked = () => {
-          const duration = v.duration;
-
-          // Generate thumbnail
-          const canvas = document.createElement('canvas');
-          // Use a reasonable size for the library thumbnail (e.g., 320px width)
-          // Maintain aspect ratio
-          const scale = 320 / v.videoWidth;
-          canvas.width = 320;
-          canvas.height = v.videoHeight * scale;
-
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-            const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
-
-            resolve({ duration, thumbnail });
-          } else {
-            resolve({ duration, thumbnail: '' }); // Fallback
-          }
-          // Cleanup
-          // URL.revokeObjectURL(v.src); // Do this after resolving?
-        };
-
-        // Error handling
-        v.onerror = () => {
-          resolve({ duration: 0, thumbnail: '' });
-        };
-
-        v.src = URL.createObjectURL(file);
-      });
-    };
-
-    const { duration, thumbnail } = await processVideo(pendingFile);
+    const { duration, thumbnail } = await extractThumbnail(pendingFile, trimStart);
 
     await addVideoToLibrary({
       name: name,
@@ -110,7 +62,7 @@ export function VideoLibrary() {
       duration: duration,
       trimStart,
       trimEnd,
-      thumbnail, // Save the generated thumbnail
+      thumbnail,
     });
 
     toast({ title: "Segment Saved" });
