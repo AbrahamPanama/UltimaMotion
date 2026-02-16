@@ -90,34 +90,40 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     videoElement.muted = isMuted || !isActive;
   }, [isActive, isMuted]);
 
-  // Handle video events
+  // Handle video events — all times normalised to trim-relative (0 → trimLength)
   useEffect(() => {
     const videoElement = videoRef.current;
     if (!videoElement || !video) return;
 
+    const trimStart = video.trimStart || 0;
+
     const handleTimeUpdate = () => {
+      const now = videoElement.currentTime;
       if (!isSyncEnabled) {
-        const now = videoElement.currentTime;
-        if (isLoopEnabled && video.trimEnd && now >= video.trimEnd) {
-          const wasPlaying = !videoElement.paused;
-          const overshoot = now - video.trimEnd;
-          videoElement.currentTime = (video.trimStart || 0) + overshoot;
-          if (wasPlaying) {
+        const trimEnd = video.trimEnd || videoElement.duration;
+        if (isLoopEnabled && now >= trimEnd) {
+          const overshoot = now - trimEnd;
+          videoElement.currentTime = trimStart + overshoot;
+          if (!videoElement.paused) {
             videoElement.play().catch(e => console.warn("Loop play failed", e));
           }
         }
       }
-      setCurrentTime(videoElement.currentTime);
+      // Report trim-relative time to the slider
+      setCurrentTime(Math.max(0, videoElement.currentTime - trimStart));
     };
 
     const handleEnded = () => {
       if (!isSyncEnabled && isLoopEnabled) {
-        videoElement.currentTime = video.trimStart || 0;
+        videoElement.currentTime = trimStart;
         videoElement.play().catch(e => console.warn("Loop play failed", e));
       }
     };
 
-    const handleDurationChange = () => setDuration(videoElement.duration);
+    const handleDurationChange = () => {
+      const trimEnd = video.trimEnd || videoElement.duration;
+      setDuration(Math.max(0, trimEnd - trimStart));
+    };
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
 
@@ -127,9 +133,13 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     videoElement.addEventListener('play', handlePlay);
     videoElement.addEventListener('pause', handlePause);
 
-    videoElement.currentTime = video.trimStart || 0;
-    setCurrentTime(videoElement.currentTime);
-    if (videoElement.duration) setDuration(videoElement.duration);
+    // Initialize at trim start
+    videoElement.currentTime = trimStart;
+    setCurrentTime(0);
+    if (videoElement.duration) {
+      const trimEnd = video.trimEnd || videoElement.duration;
+      setDuration(Math.max(0, trimEnd - trimStart));
+    }
     setIsPlaying(!videoElement.paused);
 
     return () => {
@@ -149,13 +159,16 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     }
   };
 
+  // time is trim-relative (0 = trimStart), convert back to raw
   const handleSeek = (time: number) => {
     const videoElement = videoRef.current;
     if (videoElement) {
       const start = video?.trimStart || 0;
       const end = video?.trimEnd || videoElement.duration;
-      videoElement.currentTime = Math.max(start, Math.min(time, end));
-      setCurrentTime(videoElement.currentTime);
+      const trimLength = end - start;
+      const clampedRelative = Math.max(0, Math.min(time, trimLength));
+      videoElement.currentTime = start + clampedRelative;
+      setCurrentTime(clampedRelative);
     }
   };
 
@@ -182,16 +195,15 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const handleStep = (seconds: number) => {
     const videoElement = videoRef.current;
     if (videoElement) {
+      const start = video?.trimStart || 0;
+      const end = video?.trimEnd || videoElement.duration;
       if (isSyncEnabled) {
         updateSyncOffset(index, seconds);
-        // We add seconds to current time to visualize the shift immediately
         videoElement.currentTime = videoElement.currentTime + seconds;
       } else {
-        const start = video?.trimStart || 0;
-        const end = video?.trimEnd || videoElement.duration;
         videoElement.currentTime = Math.max(start, Math.min(videoElement.currentTime + seconds, end));
       }
-      setCurrentTime(videoElement.currentTime);
+      setCurrentTime(Math.max(0, videoElement.currentTime - start));
     }
   };
 
