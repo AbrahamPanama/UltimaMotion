@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
-import type { Video } from '@/types';
+import type { Video, Drawing, DrawingType } from '@/types';
 import { initDB, getAllVideos, addVideo as addVideoDB, deleteVideo as deleteVideoDB } from '@/lib/db';
 import { useToast } from "@/hooks/use-toast";
 
@@ -45,6 +45,17 @@ interface AppContextType {
   setZoomLevel: (index: number, scale: number) => void;
   panPositions: {x: number, y: number}[];
   setPanPosition: (index: number, position: {x: number, y: number}) => void;
+
+  // Drawing state
+  isDrawingEnabled: boolean;
+  toggleDrawing: () => void;
+  drawingTool: DrawingType;
+  setDrawingTool: (tool: DrawingType) => void;
+  drawingColor: string;
+  setDrawingColor: (color: string) => void;
+  drawings: Record<string, Drawing[]>;
+  setDrawingsForVideo: (videoId: string, newDrawings: Drawing[]) => void;
+  clearDrawings: (videoId: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -64,6 +75,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   
   const [zoomLevels, setZoomLevels] = useState<number[]>(Array(MAX_SLOTS).fill(1));
   const [panPositions, setPanPositions] = useState<{x: number, y: number}[]>(Array(MAX_SLOTS).fill({x: 0, y: 0}));
+
+  // Drawing state
+  const [isDrawingEnabled, setIsDrawingEnabled] = useState<boolean>(false);
+  const [drawingTool, setDrawingTool] = useState<DrawingType>('free');
+  const [drawingColor, setDrawingColor] = useState<string>('#ef4444'); // Default red
+  const [drawings, setDrawings] = useState<Record<string, Drawing[]>>({});
 
   const loadLibrary = useCallback(async () => {
     try {
@@ -157,6 +174,24 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
       return newOffsets;
     });
+
+    // Reset zoom level
+    setZoomLevels(prev => {
+        const newLevels = [...prev];
+        if (index >= 0 && index < MAX_SLOTS) {
+          newLevels[index] = 1;
+        }
+        return newLevels;
+    });
+
+    // Reset pan position
+    setPanPositions(prev => {
+        const newPositions = [...prev];
+        if (index >= 0 && index < MAX_SLOTS) {
+          newPositions[index] = {x: 0, y: 0};
+        }
+        return newPositions;
+    });
   };
 
   const handleSetLayout = (newLayout: Layout) => {
@@ -176,6 +211,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const togglePortraitMode = () => setIsPortraitMode(prev => !prev);
   const toggleLoop = () => setIsLoopEnabled(prev => !prev);
   const toggleMute = () => setIsMuted(prev => !prev);
+  
+  const toggleDrawing = () => setIsDrawingEnabled(prev => !prev);
 
   const updateSyncOffset = useCallback((index: number, delta: number) => {
     setSyncOffsets(prev => {
@@ -206,6 +243,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       return newPositions;
     });
   };
+  
+  const setDrawingsForVideo = (videoId: string, newDrawings: Drawing[]) => {
+      setDrawings(prev => ({
+          ...prev,
+          [videoId]: newDrawings
+      }));
+  };
+  
+  const clearDrawings = (videoId: string) => {
+      setDrawings(prev => ({
+          ...prev,
+          [videoId]: []
+      }));
+  };
 
   const value = {
     library,
@@ -232,7 +283,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     zoomLevels,
     setZoomLevel,
     panPositions,
-    setPanPosition
+    setPanPosition,
+    
+    // Drawing
+    isDrawingEnabled,
+    toggleDrawing,
+    drawingTool,
+    setDrawingTool,
+    drawingColor,
+    setDrawingColor,
+    drawings,
+    setDrawingsForVideo,
+    clearDrawings
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

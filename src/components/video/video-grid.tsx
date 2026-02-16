@@ -140,49 +140,6 @@ export default function VideoGrid() {
         setPlaybackRate(rate);
     };
 
-    // Step function for sync mode
-    const handleStep = (seconds: number) => {
-        const active = getActiveVideos();
-        
-        // If playing, pause first
-        if (isPlaying) {
-            handlePlayPause();
-        }
-
-        active.forEach(({ video, index, slot }) => {
-             // Just advance everything by 'seconds' relative to current state
-             // We don't change offsets here, we just move the playhead
-             video.currentTime = video.currentTime + seconds;
-        });
-        
-        // Update UI time from master
-        if (active.length > 0) {
-            const master = active[0];
-            const start = master.slot.trimStart || 0;
-            setCurrentTime(master.video.currentTime - start - (syncOffsets[master.index] || 0));
-        }
-    };
-
-    const renderStepBtn = (seconds: number, size: number, labelOverride?: string) => {
-        const isNeg = seconds < 0;
-        const label = labelOverride || `${isNeg ? '' : '+'}${seconds}s`;
-        return (
-          <button
-            key={label}
-            onClick={(e) => { e.stopPropagation(); handleStep(seconds); }}
-            className="flex-shrink-0 text-white/90 hover:text-white hover:scale-110 active:scale-90 transition-all focus:outline-none focus:ring-1 focus:ring-white/50 rounded-full"
-            title={label}
-            aria-label={`Step video ${label}`}
-          >
-            <div className="relative flex items-center justify-center bg-black/60 rounded-full px-2 py-1 backdrop-blur-sm border border-white/20 hover:bg-black/80 transition-colors">
-                <span className="font-mono font-bold text-xs" style={{ fontSize: size/2.2 }}>
-                    {label}
-                </span>
-            </div>
-          </button>
-        );
-      };
-
     const gridClasses = {
         1: 'grid-cols-1',
         2: 'grid-cols-1 md:grid-cols-2',
@@ -206,17 +163,6 @@ export default function VideoGrid() {
             {/* Global Sync Controls Bar */}
             {isSyncEnabled && (
                  <div className="bg-card p-3 border rounded-lg shadow-sm mt-auto flex flex-col gap-2">
-                    
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                        {renderStepBtn(-0.5, 28)}
-                        {renderStepBtn(-0.1, 28)}
-                        {renderStepBtn(-1/30, 28, '-1f')}
-                        <div className="w-px h-4 bg-border/50 mx-2" />
-                        {renderStepBtn(1/30, 28, '+1f')}
-                        {renderStepBtn(0.1, 28)}
-                        {renderStepBtn(0.5, 28)}
-                    </div>
-
                     <PlayerControls
                         isPlaying={isPlaying}
                         onPlayPause={handlePlayPause}

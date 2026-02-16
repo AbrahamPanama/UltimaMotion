@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
+import DrawingCanvas, { Drawing } from './drawing-canvas';
 
 interface VideoTileProps {
   video: Video | null;
@@ -34,7 +35,13 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     zoomLevels,
     setZoomLevel,
     panPositions,
-    setPanPosition
+    setPanPosition,
+    // Drawing
+    isDrawingEnabled,
+    drawingTool,
+    drawingColor,
+    drawings,
+    setDrawingsForVideo
   } = useAppContext();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -55,6 +62,8 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const scale = zoomLevels[index] || 1;
   const position = panPositions[index] || { x: 0, y: 0 };
 
+  const currentDrawings = video ? (drawings[video.id] || []) : [];
+
   // Handle ref assignment and cleanup
   useEffect(() => {
     if (videoRefs.current) {
@@ -66,6 +75,13 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
       }
     };
   }, [index, videoRefs, video]);
+
+  // Reset local state when video changes
+  useEffect(() => {
+      if (video) {
+          setPlaybackRate(1.0);
+      }
+  }, [video]);
 
   // Mute/unmute based on active state and global mute toggle
   useEffect(() => {
@@ -162,11 +178,13 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     toast({ title: 'Video Removed', description: `Slot ${index + 1} cleared.` });
   };
 
+  // --- Step Logic for Fine Tuning ---
   const handleStep = (seconds: number) => {
     const videoElement = videoRef.current;
     if (videoElement) {
       if (isSyncEnabled) {
         updateSyncOffset(index, seconds);
+        // We add seconds to current time to visualize the shift immediately
         videoElement.currentTime = videoElement.currentTime + seconds;
       } else {
         const start = video?.trimStart || 0;
@@ -200,6 +218,8 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   // --- Zoom and Pan Logic ---
 
   const handleZoom = useCallback((delta: number, clientX: number, clientY: number) => {
+    if (isDrawingEnabled && isActive) return; // Disable zoom/pan via mouse/wheel when drawing
+
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -225,19 +245,19 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
 
     setZoomLevel(index, newScale);
     setPanPosition(index, { x: clampedX, y: clampedY });
-  }, [scale, position, index, setZoomLevel, setPanPosition]);
+  }, [scale, position, index, setZoomLevel, setPanPosition, isDrawingEnabled, isActive]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    // Zoom with scroll wheel (no modifier needed, as requested)
+    if (isDrawingEnabled && isActive) return;
     e.preventDefault();
     e.stopPropagation();
-
     const zoomSensitivity = 0.001;
     const delta = -e.deltaY * zoomSensitivity;
     handleZoom(delta, e.clientX, e.clientY);
-  }, [handleZoom]);
+  }, [handleZoom, isDrawingEnabled, isActive]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (isDrawingEnabled && isActive) return; // Let DrawingCanvas handle events
     if (scale > 1) {
       setIsDragging(true);
       setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
@@ -246,6 +266,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (isDrawingEnabled && isActive) return;
     if (isDragging && scale > 1) {
       e.preventDefault();
       const newX = e.clientX - dragStart.x;
@@ -283,6 +304,8 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
+    if (isDrawingEnabled && isActive) return;
+
     if (e.touches.length === 2) {
       const dist = getDistance(e.touches[0], e.touches[1]);
       lastTouchDistance.current = dist;
@@ -294,35 +317,25 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    if (isDrawingEnabled && isActive) return;
+
     if (e.touches.length === 2 && lastTouchDistance.current !== null) {
       e.preventDefault(); // Prevent page scroll/zoom
       const dist = getDistance(e.touches[0], e.touches[1]);
       const center = getCenter(e.touches[0], e.touches[1]);
-      
-      // Calculate delta scale
-      // Dist ratio: dist / lastTouchDistance.current
-      // But our handleZoom expects a delta to add to current scale.
-      // Current implementation is linear additive. Pinch is usually multiplicative.
-      // Let's approximate:
       const scaleFactor = dist / lastTouchDistance.current;
       const delta = (scale * scaleFactor) - scale;
-      
-      // We want to zoom relative to the center of the pinch
       handleZoom(delta, center.x, center.y);
-      
       lastTouchDistance.current = dist;
       lastTouchCenter.current = center;
     } else if (e.touches.length === 1 && isDragging && scale > 1) {
        e.preventDefault();
        const newX = e.touches[0].clientX - dragStart.x;
        const newY = e.touches[0].clientY - dragStart.y;
-       
        const rect = containerRef.current?.getBoundingClientRect();
        if (!rect) return;
-
        const maxX = (rect.width * (scale - 1)) / 2;
        const maxY = (rect.height * (scale - 1)) / 2;
-
        setPanPosition(index, {
          x: Math.max(-maxX, Math.min(newX, maxX)),
          y: Math.max(-maxY, Math.min(newY, maxY))
@@ -411,11 +424,26 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
           }}
           playsInline
         />
+        
+        {/* Drawing Canvas Overlay */}
+        {video && (
+             <DrawingCanvas
+                width={containerRef.current?.clientWidth || 0}
+                height={containerRef.current?.clientHeight || 0}
+                scale={scale}
+                position={position}
+                tool={drawingTool}
+                color={drawingColor}
+                isActive={isDrawingEnabled && isActive}
+                drawings={currentDrawings}
+                onDrawingsChange={(newDrawings) => setDrawingsForVideo(video.id, newDrawings)}
+             />
+        )}
       </div>
       
       {/* Controls Overlay */}
       <div className="z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent pb-1 pt-4 px-2 flex flex-col gap-2">
-        {/* Step buttons bar - Visible now */}
+        {/* Step buttons bar - Added Back */}
         <div 
           className="flex items-center justify-center gap-2 py-1" 
           onClick={e => e.stopPropagation()}

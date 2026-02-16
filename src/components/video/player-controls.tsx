@@ -69,10 +69,21 @@ export default function PlayerControls({
     onSeek(value[0]);
   };
   
-  const handleStepBack = (e: React.MouseEvent) => { e.stopPropagation(); onSeek(Math.max(0, currentTime - FRAME_STEP)); };
-  const handleStepForward = (e: React.MouseEvent) => { e.stopPropagation(); onSeek(Math.min(duration, currentTime + FRAME_STEP)); };
-  const handleSkipBack = (e: React.MouseEvent) => { e.stopPropagation(); onSeek(Math.max(0, currentTime - 5)); };
-  const handleSkipForward = (e: React.MouseEvent) => { e.stopPropagation(); onSeek(Math.min(duration, currentTime + 5)); };
+  const handleStepBack = (e: React.MouseEvent) => { 
+    e.stopPropagation(); 
+    if (isPlaying) {
+      onPlayPause();
+    }
+    onSeek(Math.max(0, currentTime - FRAME_STEP)); 
+  };
+
+  const handleStepForward = (e: React.MouseEvent) => { 
+    e.stopPropagation(); 
+    if (isPlaying) {
+      onPlayPause();
+    }
+    onSeek(Math.min(duration, currentTime + FRAME_STEP)); 
+  };
   
   const handlePlayClick = (e: React.MouseEvent) => { e.stopPropagation(); onPlayPause(); };
 
@@ -116,8 +127,8 @@ export default function PlayerControls({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/20 rounded-full transition-colors"
-                    onClick={handleSkipBack}
-                    title="-5s"
+                    onClick={handleStepBack}
+                    title="Previous Frame"
                 >
                     <SkipBack className="h-4 w-4 fill-current" />
                 </Button>
@@ -127,6 +138,7 @@ export default function PlayerControls({
                     size="icon"
                     className="h-8 w-8 text-white hover:text-white hover:bg-white/20 rounded-full transition-colors"
                     onClick={handlePlayClick}
+                    title={isPlaying ? "Pause" : "Play"}
                 >
                     {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current ml-0.5" />}
                 </Button>
@@ -135,8 +147,8 @@ export default function PlayerControls({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/20 rounded-full transition-colors"
-                    onClick={handleSkipForward}
-                    title="+5s"
+                    onClick={handleStepForward}
+                    title="Next Frame"
                 >
                     <SkipForward className="h-4 w-4 fill-current" />
                 </Button>

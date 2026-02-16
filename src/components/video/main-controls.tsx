@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { LayoutGrid, Square, Rows, Smartphone, Repeat, Radio, Volume2, VolumeX } from 'lucide-react';
+import DrawingToolbar from './drawing-toolbar';
 
 export default function MainControls() {
   const { 
@@ -128,6 +129,11 @@ export default function MainControls() {
                 onCheckedChange={toggleSync}
                  className="scale-75"
              />
+          </div>
+
+          {/* Drawing Toolbar */}
+          <div className="flex items-center gap-2 pl-2 border-l border-border/50">
+             <DrawingToolbar />
           </div>
 
         </div>
