@@ -5,110 +5,107 @@
 @layer base {
   :root {
     /* 
-      LIGHT MODE PALETTE 
-      Based on:
-      #486499 (Muted Blue) -> 219 36% 44%
-      #fff68d (Yellow)     -> 56 100% 77%
-      #ffffff (White)      -> 0 0% 100%
-      #2a2875 (Deep Blue)  -> 242 49% 31%
-      #e7ddd8 (Beige)      -> 20 22% 88%
+      LIGHT MODE — Cool Blue-Gray Tinted Surface
+      Primary: #486499 → 219 36% 44%
+      Accent:  #fff68d → 56 100% 77%
+      Text:    #2a2875 → 242 49% 31%
+      Surface: Cool gray-blue tint for depth
     */
-    --background: 0 0% 100%;       /* White */
-    --foreground: 242 49% 31%;     /* Deep Blue Text */
+    --background: 220 20% 97%;        /* Cool blue-tinted off-white */
+    --foreground: 242 49% 25%;        /* Deep Blue Text (slightly darker for contrast) */
 
-    --card: 0 0% 100%;             /* White Card */
-    --card-foreground: 242 49% 31%; /* Deep Blue Text */
+    --card: 0 0% 100%;                /* Pure white cards — contrast against bg */
+    --card-foreground: 242 49% 25%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 242 49% 31%;
+    --popover-foreground: 242 49% 25%;
 
-    --primary: 219 36% 44%;        /* Muted Blue */
-    --primary-foreground: 0 0% 100%; /* White Text */
+    --primary: 219 40% 42%;           /* Muted Blue — slightly more saturated */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 20 22% 88%;       /* Beige */
-    --secondary-foreground: 242 49% 31%; /* Deep Blue Text */
+    --secondary: 220 18% 90%;         /* Cool gray — clear tint, not invisible */
+    --secondary-foreground: 242 49% 25%;
 
-    --muted: 20 22% 92%;           /* Lightened Beige */
-    --muted-foreground: 242 30% 50%; /* Desaturated Blue Text */
+    --muted: 220 15% 92%;             /* Soft gray — visible toggle tracks */
+    --muted-foreground: 220 20% 42%;  /* Mid-blue gray — legible secondary text */
 
-    --accent: 56 100% 77%;         /* Yellow */
-    --accent-foreground: 242 49% 31%; /* Deep Blue Text */
+    --accent: 56 100% 72%;            /* Yellow — slightly deeper for readability */
+    --accent-foreground: 242 49% 20%;
 
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 20 22% 88%;          /* Beige Border */
-    --input: 20 22% 88%;           /* Beige Input */
-    --ring: 219 36% 44%;           /* Muted Blue Ring */
+    --border: 220 15% 82%;            /* Blue-gray border — clearly visible */
+    --input: 220 15% 85%;             /* Slightly lighter than border for inputs */
+    --ring: 219 40% 42%;
 
     --radius: 0.5rem;
-    
-    /* Charts can use variations of the palette */
-    --chart-1: 219 36% 44%; 
-    --chart-2: 242 49% 31%;
-    --chart-3: 56 100% 77%;
-    --chart-4: 20 22% 88%;
-    --chart-5: 242 30% 50%;
 
-    /* Sidebar - Beige in Light Mode */
-    --sidebar-background: 20 22% 92%; /* Using Lightened Beige */
-    --sidebar-foreground: 242 49% 31%;
-    --sidebar-primary: 219 36% 44%;
+    --chart-1: 219 40% 42%;
+    --chart-2: 242 49% 31%;
+    --chart-3: 56 100% 72%;
+    --chart-4: 220 15% 85%;
+    --chart-5: 220 20% 50%;
+
+    /* Sidebar — distinct panel with blue-gray tint */
+    --sidebar-background: 220 20% 94%;
+    --sidebar-foreground: 242 49% 25%;
+    --sidebar-primary: 219 40% 42%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 20 22% 88%; /* Slightly darker beige for hover */
-    --sidebar-accent-foreground: 242 49% 31%;
-    --sidebar-border: 20 22% 85%;
-    --sidebar-ring: 219 36% 44%;
+    --sidebar-accent: 220 18% 88%;    /* Visible hover state */
+    --sidebar-accent-foreground: 242 49% 25%;
+    --sidebar-border: 220 15% 80%;    /* Clear separator */
+    --sidebar-ring: 219 40% 42%;
   }
 
   .dark {
     /* 
-      DARK MODE PALETTE REFINEMENT 
-      Using Deep Blue as base instead of generic gray/black.
+      DARK MODE — Polished Deep Blue
+      Rich indigo base with bright accents
     */
-    --background: 242 49% 10%;     /* Very Dark Blue */
-    --foreground: 20 22% 88%;      /* Beige Text */
+    --background: 242 50% 9%;         /* Very dark indigo */
+    --foreground: 220 15% 90%;        /* Soft white-blue text */
 
-    --card: 242 49% 12%;           /* Slightly Lighter Dark Blue */
-    --card-foreground: 20 22% 88%; /* Beige Text */
+    --card: 242 45% 12%;              /* Slightly lifted dark card */
+    --card-foreground: 220 15% 90%;
 
-    --popover: 242 49% 10%;
-    --popover-foreground: 20 22% 88%;
+    --popover: 242 45% 11%;
+    --popover-foreground: 220 15% 90%;
 
-    --primary: 219 36% 54%;        /* Lighter Muted Blue for Dark Mode */
+    --primary: 219 45% 55%;           /* Bright muted blue */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 242 40% 20%;      /* Dark Blue/Gray */
-    --secondary-foreground: 20 22% 88%;
+    --secondary: 242 35% 18%;         /* Dark panel */
+    --secondary-foreground: 220 15% 88%;
 
-    --muted: 242 40% 20%;
-    --muted-foreground: 219 20% 70%; /* Muted Blue-Gray Text */
+    --muted: 242 35% 18%;
+    --muted-foreground: 220 15% 65%;  /* Visible muted text */
 
-    --accent: 56 100% 77%;         /* Yellow remains same for pop */
-    --accent-foreground: 242 49% 31%; /* Dark Text on Yellow */
+    --accent: 56 100% 75%;            /* Yellow pop */
+    --accent-foreground: 242 49% 20%;
 
-    --destructive: 0 62.8% 30.6%;
+    --destructive: 0 63% 35%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 242 40% 20%;         /* Dark Blue Border */
-    --input: 242 40% 20%;
-    --ring: 219 36% 54%;
-    
-    --chart-1: 219 36% 54%;
-    --chart-2: 20 22% 88%;
-    --chart-3: 56 100% 77%;
-    --chart-4: 242 40% 40%;
-    --chart-5: 219 20% 70%;
+    --border: 242 35% 22%;            /* Slightly brighter dark border */
+    --input: 242 35% 22%;
+    --ring: 219 45% 55%;
 
-    /* Sidebar - Dark in Dark Mode */
-    --sidebar-background: 242 49% 12%; /* Matching card background */
-    --sidebar-foreground: 20 22% 88%;
-    --sidebar-primary: 219 36% 54%;
+    --chart-1: 219 45% 55%;
+    --chart-2: 220 15% 88%;
+    --chart-3: 56 100% 75%;
+    --chart-4: 242 35% 38%;
+    --chart-5: 220 15% 65%;
+
+    /* Sidebar — subtle lift from background */
+    --sidebar-background: 242 45% 11%;
+    --sidebar-foreground: 220 15% 90%;
+    --sidebar-primary: 219 45% 55%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 242 40% 20%;
-    --sidebar-accent-foreground: 20 22% 88%;
-    --sidebar-border: 242 40% 20%;
-    --sidebar-ring: 219 36% 54%;
+    --sidebar-accent: 242 35% 20%;
+    --sidebar-accent-foreground: 220 15% 90%;
+    --sidebar-border: 242 35% 22%;
+    --sidebar-ring: 219 45% 55%;
   }
 }
 

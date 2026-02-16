@@ -156,7 +156,7 @@ export function MobileLibrary() {
               library.map((video) => (
                 <div
                   key={video.id}
-                  className="group relative flex-shrink-0 w-[130px] snap-start cursor-pointer"
+                  className="group relative flex-shrink-0 w-[156px] snap-start cursor-pointer"
                   onClick={() => handleAddToGrid(video)}
                 >
                   {/* Thumbnail */}
