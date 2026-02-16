@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -29,16 +29,7 @@ export function VideoRecorder() {
 
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [showTrimDialog, setShowTrimDialog] = useState(false);
-  const [isPortrait, setIsPortrait] = useState(false);
-
-  // Detect device orientation
-  useEffect(() => {
-    const mql = window.matchMedia('(orientation: portrait)');
-    setIsPortrait(mql.matches);
-    const handler = (e: MediaQueryListEvent) => setIsPortrait(e.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
+  const [streamAspect, setStreamAspect] = useState<number>(16 / 9); // actual stream aspect ratio
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach(track => track.stop());
@@ -48,18 +39,14 @@ export function VideoRecorder() {
     }
   }, []);
 
-  const startPreview = useCallback(async (facing: 'environment' | 'user', portrait?: boolean) => {
+  const startPreview = useCallback(async (facing: 'environment' | 'user') => {
     stopStream();
     try {
-      // Flip dimensions based on device orientation so the camera delivers the right stream
-      const wIdeal = portrait ? 1080 : 1920;
-      const hIdeal = portrait ? 1920 : 1080;
-
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: facing },
-          width: { ideal: wIdeal },
-          height: { ideal: hIdeal },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
           frameRate: { ideal: 60, max: 60 },
         },
         audio: true,
@@ -69,6 +56,13 @@ export function VideoRecorder() {
         videoPreviewRef.current.srcObject = stream;
         videoPreviewRef.current.controls = false;
         videoPreviewRef.current.src = "";
+
+        // Detect actual stream dimensions once video loads
+        videoPreviewRef.current.onloadedmetadata = () => {
+          const vw = videoPreviewRef.current?.videoWidth || 16;
+          const vh = videoPreviewRef.current?.videoHeight || 9;
+          setStreamAspect(vw / vh);
+        };
       }
       setError(null);
       return stream;
@@ -84,7 +78,7 @@ export function VideoRecorder() {
     setError(null);
     recordedChunksRef.current = [];
 
-    const stream = streamRef.current || await startPreview(facingMode, isPortrait);
+    const stream = streamRef.current || await startPreview(facingMode);
     if (!stream) return;
 
     mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'video/webm' });
@@ -118,13 +112,13 @@ export function VideoRecorder() {
     if (isRecording) return;
     const newFacing = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(newFacing);
-    await startPreview(newFacing, isPortrait);
-  }, [facingMode, isRecording, startPreview, isPortrait]);
+    await startPreview(newFacing);
+  }, [facingMode, isRecording, startPreview]);
 
   const handleOpen = useCallback(async () => {
     setIsOpen(true);
-    setTimeout(() => startPreview(facingMode, isPortrait), 100);
-  }, [facingMode, startPreview, isPortrait]);
+    setTimeout(() => startPreview(facingMode), 100);
+  }, [facingMode, startPreview]);
 
   const handleSaveTrimmed = async (name: string, trimStart: number, trimEnd: number) => {
     if (!recordedBlob) return;
@@ -180,7 +174,10 @@ export function VideoRecorder() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className={`relative w-full bg-muted rounded-md overflow-hidden ${isPortrait ? 'aspect-[9/16] max-h-[50vh]' : 'aspect-video'}`}>
+          <div
+            className="relative w-full bg-muted rounded-md overflow-hidden"
+            style={{ aspectRatio: streamAspect, maxHeight: streamAspect < 1 ? '55vh' : undefined }}
+          >
             <video ref={videoPreviewRef} playsInline autoPlay muted className="w-full h-full object-contain"></video>
             {/* Camera flip button */}
             <Button
