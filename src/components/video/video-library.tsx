@@ -139,7 +139,7 @@ export function VideoLibrary() {
 
   return (
     <>
-      <Sidebar className="bg-[hsl(var(--sidebar-background))]">
+      <Sidebar mobileSide="bottom" className="bg-[hsl(var(--sidebar-background))]">
         <SidebarHeader>
             <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold font-headline text-sidebar-foreground">Library</h2>

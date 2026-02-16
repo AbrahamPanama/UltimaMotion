@@ -162,6 +162,7 @@ const Sidebar = React.forwardRef<
     side?: "left" | "right"
     variant?: "sidebar" | "floating" | "inset"
     collapsible?: "offcanvas" | "icon" | "none"
+    mobileSide?: "left" | "right" | "top" | "bottom"
   }
 >(
   (
@@ -169,6 +170,7 @@ const Sidebar = React.forwardRef<
       side = "left",
       variant = "sidebar",
       collapsible = "offcanvas",
+      mobileSide = "left",
       className,
       children,
       ...props
@@ -193,18 +195,22 @@ const Sidebar = React.forwardRef<
     }
 
     if (isMobile) {
+      const isVertical = mobileSide === "top" || mobileSide === "bottom";
       return (
         <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
           <SheetContent
             data-sidebar="sidebar"
             data-mobile="true"
-            className="w-[--sidebar-width] bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+            className={cn(
+                "bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden",
+                isVertical ? "w-full h-[--sidebar-width]" : "w-[--sidebar-width] h-full"
+            )}
             style={
               {
                 "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
               } as React.CSSProperties
             }
-            side={side}
+            side={mobileSide}
           >
             <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContent>
