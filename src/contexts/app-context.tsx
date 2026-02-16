@@ -40,11 +40,11 @@ interface AppContextType {
   setActiveTileIndex: (index: number | null) => void;
 
   videoRefs: React.MutableRefObject<(HTMLVideoElement | null)[]>;
-  
+
   zoomLevels: number[];
   setZoomLevel: (index: number, scale: number) => void;
-  panPositions: {x: number, y: number}[];
-  setPanPosition: (index: number, position: {x: number, y: number}) => void;
+  panPositions: { x: number, y: number }[];
+  setPanPosition: (index: number, position: { x: number, y: number }) => void;
 
   // Drawing state
   isDrawingEnabled: boolean;
@@ -72,9 +72,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [activeTileIndex, setActiveTileIndex] = useState<number | null>(0);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const { toast } = useToast();
-  
+
   const [zoomLevels, setZoomLevels] = useState<number[]>(Array(MAX_SLOTS).fill(1));
-  const [panPositions, setPanPositions] = useState<{x: number, y: number}[]>(Array(MAX_SLOTS).fill({x: 0, y: 0}));
+  const [panPositions, setPanPositions] = useState<{ x: number, y: number }[]>(Array(MAX_SLOTS).fill({ x: 0, y: 0 }));
 
   // Drawing state
   const [isDrawingEnabled, setIsDrawingEnabled] = useState<boolean>(false);
@@ -107,10 +107,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         url: URL.createObjectURL(videoData.blob),
         createdAt: new Date(),
       };
-      
+
       // Save to IndexedDB
       await addVideoDB(newVideo);
-      
+
       // Update state
       setLibrary(prev => [...prev, newVideo]);
       // toast({ title: "Video Saved", description: `"${newVideo.name}" has been added to your library.` }); // Toast handled by caller for more context
@@ -129,7 +129,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         return prev.filter(v => v.id !== id);
       });
       setSlots(prevSlots => prevSlots.map(slot => (slot?.id === id ? null : slot)));
-      toast({ title: "Video Removed", description: "The video has been deleted from your library." });
+      toast({ title: "Video Removed" });
     } catch (error) {
       console.error('Failed to remove video:', error);
       toast({ title: "Error", description: "Failed to remove video.", variant: "destructive" });
@@ -142,25 +142,25 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (index >= 0 && index < MAX_SLOTS) {
         newSlots[index] = video;
       }
-      
+
       // Auto-expand layout logic
       if (video !== null) {
         // Count how many slots will be filled after this update
         const filledCount = newSlots.filter(s => s !== null).length;
-        
+
         // If we are adding a video, ensure layout is big enough
         // Current layout vs needed layout
         // 1 video -> layout 1
         // 2 videos -> layout 2
         // 3-4 videos -> layout 4
-        
+
         let requiredLayout: Layout = 1;
         if (filledCount > 2) requiredLayout = 4;
         else if (filledCount > 1) requiredLayout = 2;
-        
+
         // Only expand, don't shrink automatically
         if (requiredLayout > layout) {
-            setLayout(requiredLayout);
+          setLayout(requiredLayout);
         }
       }
       return newSlots;
@@ -170,27 +170,27 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setSyncOffsets(prev => {
       const newOffsets = [...prev];
       if (index >= 0 && index < MAX_SLOTS) {
-          newOffsets[index] = 0;
+        newOffsets[index] = 0;
       }
       return newOffsets;
     });
 
     // Reset zoom level
     setZoomLevels(prev => {
-        const newLevels = [...prev];
-        if (index >= 0 && index < MAX_SLOTS) {
-          newLevels[index] = 1;
-        }
-        return newLevels;
+      const newLevels = [...prev];
+      if (index >= 0 && index < MAX_SLOTS) {
+        newLevels[index] = 1;
+      }
+      return newLevels;
     });
 
     // Reset pan position
     setPanPositions(prev => {
-        const newPositions = [...prev];
-        if (index >= 0 && index < MAX_SLOTS) {
-          newPositions[index] = {x: 0, y: 0};
-        }
-        return newPositions;
+      const newPositions = [...prev];
+      if (index >= 0 && index < MAX_SLOTS) {
+        newPositions[index] = { x: 0, y: 0 };
+      }
+      return newPositions;
     });
   };
 
@@ -211,7 +211,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const togglePortraitMode = () => setIsPortraitMode(prev => !prev);
   const toggleLoop = () => setIsLoopEnabled(prev => !prev);
   const toggleMute = () => setIsMuted(prev => !prev);
-  
+
   const toggleDrawing = () => setIsDrawingEnabled(prev => !prev);
 
   const updateSyncOffset = useCallback((index: number, delta: number) => {
@@ -233,7 +233,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
-  const setPanPosition = (index: number, position: {x: number, y: number}) => {
+  const setPanPosition = (index: number, position: { x: number, y: number }) => {
     setPanPositions(prev => {
       if (isSyncEnabled) {
         return prev.map(() => position);
@@ -243,19 +243,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       return newPositions;
     });
   };
-  
+
   const setDrawingsForVideo = (videoId: string, newDrawings: Drawing[]) => {
-      setDrawings(prev => ({
-          ...prev,
-          [videoId]: newDrawings
-      }));
+    setDrawings(prev => ({
+      ...prev,
+      [videoId]: newDrawings
+    }));
   };
-  
+
   const clearDrawings = (videoId: string) => {
-      setDrawings(prev => ({
-          ...prev,
-          [videoId]: []
-      }));
+    setDrawings(prev => ({
+      ...prev,
+      [videoId]: []
+    }));
   };
 
   const value = {
@@ -284,7 +284,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setZoomLevel,
     panPositions,
     setPanPosition,
-    
+
     // Drawing
     isDrawingEnabled,
     toggleDrawing,

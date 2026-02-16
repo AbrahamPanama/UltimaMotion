@@ -85,7 +85,7 @@ export function MobileLibrary() {
       thumbnail,
     });
 
-    toast({ title: 'Segment Saved', description: `${name} added to your library.` });
+    toast({ title: 'Segment Saved' });
     setNextSegmentIndex((prev) => prev + 1);
   };
 
@@ -100,9 +100,9 @@ export function MobileLibrary() {
     const emptySlotIndex = slots.findIndex((slot) => slot === null);
     if (emptySlotIndex !== -1) {
       setSlot(emptySlotIndex, video);
-      toast({ title: 'Video Added', description: `"${video.name}" added to the grid.` });
+      toast({ title: 'Video Added' });
     } else {
-      toast({ title: 'Grid Full', description: 'All video slots are currently full.', variant: 'destructive' });
+      toast({ title: 'Grid Full', variant: 'destructive' });
     }
   };
 

@@ -52,10 +52,10 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  
+
   // Touch handling refs
   const lastTouchDistance = useRef<number | null>(null);
-  const lastTouchCenter = useRef<{x: number, y: number} | null>(null);
+  const lastTouchCenter = useRef<{ x: number, y: number } | null>(null);
 
   const { toast } = useToast();
 
@@ -78,9 +78,9 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
 
   // Reset local state when video changes
   useEffect(() => {
-      if (video) {
-          setPlaybackRate(1.0);
-      }
+    if (video) {
+      setPlaybackRate(1.0);
+    }
   }, [video]);
 
   // Mute/unmute based on active state and global mute toggle
@@ -169,13 +169,13 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
 
   const handleSelectVideo = (selectedVideo: Video) => {
     setSlot(index, selectedVideo);
-    toast({ title: 'Video Added', description: `"${selectedVideo.name}" added to slot ${index + 1}.` });
+    toast({ title: 'Video Added' });
   };
 
   const handleRemoveVideo = (e: React.MouseEvent) => {
     e.stopPropagation();
     setSlot(index, null);
-    toast({ title: 'Video Removed', description: `Slot ${index + 1} cleared.` });
+    toast({ title: 'Video Removed' });
   };
 
   // --- Step Logic for Fine Tuning ---
@@ -207,9 +207,9 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
         aria-label={`Step video ${label}`}
       >
         <div className="relative flex items-center justify-center bg-black/60 rounded-full px-2 py-1 backdrop-blur-sm border border-white/20 hover:bg-black/80 transition-colors">
-            <span className="font-mono font-bold text-xs" style={{ fontSize: size/2.2 }}>
-                {label}
-            </span>
+          <span className="font-mono font-bold text-xs" style={{ fontSize: size / 2.2 }}>
+            {label}
+          </span>
         </div>
       </button>
     );
@@ -271,7 +271,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
       e.preventDefault();
       const newX = e.clientX - dragStart.x;
       const newY = e.clientY - dragStart.y;
-      
+
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
 
@@ -329,17 +329,17 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
       lastTouchDistance.current = dist;
       lastTouchCenter.current = center;
     } else if (e.touches.length === 1 && isDragging && scale > 1) {
-       e.preventDefault();
-       const newX = e.touches[0].clientX - dragStart.x;
-       const newY = e.touches[0].clientY - dragStart.y;
-       const rect = containerRef.current?.getBoundingClientRect();
-       if (!rect) return;
-       const maxX = (rect.width * (scale - 1)) / 2;
-       const maxY = (rect.height * (scale - 1)) / 2;
-       setPanPosition(index, {
-         x: Math.max(-maxX, Math.min(newX, maxX)),
-         y: Math.max(-maxY, Math.min(newY, maxY))
-       });
+      e.preventDefault();
+      const newX = e.touches[0].clientX - dragStart.x;
+      const newY = e.touches[0].clientY - dragStart.y;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const maxX = (rect.width * (scale - 1)) / 2;
+      const maxY = (rect.height * (scale - 1)) / 2;
+      setPanPosition(index, {
+        x: Math.max(-maxX, Math.min(newX, maxX)),
+        y: Math.max(-maxY, Math.min(newY, maxY))
+      });
     }
   };
 
@@ -416,43 +416,43 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
           className={cn(
             'w-full h-full touch-none',
             isPortraitMode ? 'object-cover' : 'object-contain',
-             isDragging ? 'cursor-grabbing' : (scale > 1 ? 'cursor-grab' : 'cursor-default')
+            isDragging ? 'cursor-grabbing' : (scale > 1 ? 'cursor-grab' : 'cursor-default')
           )}
           style={{
-             transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
-             transition: isDragging ? 'none' : 'transform 0.1s ease-out'
+            transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
+            transition: isDragging ? 'none' : 'transform 0.1s ease-out'
           }}
           playsInline
         />
-        
+
         {/* Drawing Canvas Overlay */}
         {video && (
-             <DrawingCanvas
-                width={containerRef.current?.clientWidth || 0}
-                height={containerRef.current?.clientHeight || 0}
-                scale={scale}
-                position={position}
-                tool={drawingTool}
-                color={drawingColor}
-                isActive={isDrawingEnabled && isActive}
-                drawings={currentDrawings}
-                onDrawingsChange={(newDrawings) => setDrawingsForVideo(video.id, newDrawings)}
-             />
+          <DrawingCanvas
+            width={containerRef.current?.clientWidth || 0}
+            height={containerRef.current?.clientHeight || 0}
+            scale={scale}
+            position={position}
+            tool={drawingTool}
+            color={drawingColor}
+            isActive={isDrawingEnabled && isActive}
+            drawings={currentDrawings}
+            onDrawingsChange={(newDrawings) => setDrawingsForVideo(video.id, newDrawings)}
+          />
         )}
       </div>
-      
+
       {/* Controls Overlay */}
       <div className="z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent pb-1 pt-4 px-2 flex flex-col gap-2">
         {/* Step buttons bar - Added Back */}
-        <div 
-          className="flex items-center justify-center gap-2 py-1" 
+        <div
+          className="flex items-center justify-center gap-2 py-1"
           onClick={e => e.stopPropagation()}
         >
           {renderStepBtn(-0.5, 28)}
           {renderStepBtn(-0.1, 28)}
-          {renderStepBtn(-1/30, 28, '-1f')}
+          {renderStepBtn(-1 / 30, 28, '-1f')}
           <div className="w-px h-4 bg-white/20 mx-1" />
-          {renderStepBtn(1/30, 28, '+1f')}
+          {renderStepBtn(1 / 30, 28, '+1f')}
           {renderStepBtn(0.1, 28)}
           {renderStepBtn(0.5, 28)}
         </div>
