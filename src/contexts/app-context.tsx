@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
-import type { Video } from '@/types';
+import type { Video, Drawing, DrawingType } from '@/types';
 import { initDB, getAllVideos, addVideo as addVideoDB, deleteVideo as deleteVideoDB } from '@/lib/db';
 import { useToast } from "@/hooks/use-toast";
 
@@ -45,6 +45,17 @@ interface AppContextType {
   setZoomLevel: (index: number, scale: number) => void;
   panPositions: {x: number, y: number}[];
   setPanPosition: (index: number, position: {x: number, y: number}) => void;
+
+  // Drawing state
+  isDrawingEnabled: boolean;
+  toggleDrawing: () => void;
+  drawingTool: DrawingType;
+  setDrawingTool: (tool: DrawingType) => void;
+  drawingColor: string;
+  setDrawingColor: (color: string) => void;
+  drawings: Record<string, Drawing[]>;
+  setDrawingsForVideo: (videoId: string, newDrawings: Drawing[]) => void;
+  clearDrawings: (videoId: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -65,6 +76,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [zoomLevels, setZoomLevels] = useState<number[]>(Array(MAX_SLOTS).fill(1));
   const [panPositions, setPanPositions] = useState<{x: number, y: number}[]>(Array(MAX_SLOTS).fill({x: 0, y: 0}));
 
+  // Drawing state
+  const [isDrawingEnabled, setIsDrawingEnabled] = useState<boolean>(false);
+  const [drawingTool, setDrawingTool] = useState<DrawingType>('free');
+  const [drawingColor, setDrawingColor] = useState<string>('#ef4444'); // Default red
+  const [drawings, setDrawings] = useState<Record<string, Drawing[]>>({});
+
   const loadLibrary = useCallback(async () => {
     try {
       await initDB();
@@ -83,15 +100,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const addVideoToLibrary = async (videoData: Omit<Video, 'id' | 'url' | 'createdAt'>) => {
     try {
+      const id = crypto.randomUUID();
       const newVideo: Video = {
         ...videoData,
-        id: crypto.randomUUID(),
+        id,
         url: URL.createObjectURL(videoData.blob),
         createdAt: new Date(),
       };
+      
+      // Save to IndexedDB
       await addVideoDB(newVideo);
+      
+      // Update state
       setLibrary(prev => [...prev, newVideo]);
-      toast({ title: "Video Saved", description: `"${newVideo.name}" has been added to your library.` });
+      // toast({ title: "Video Saved", description: `"${newVideo.name}" has been added to your library.` }); // Toast handled by caller for more context
     } catch (error) {
       console.error('Failed to add video:', error);
       toast({ title: "Error", description: "Could not save video.", variant: "destructive" });
@@ -120,21 +142,55 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (index >= 0 && index < MAX_SLOTS) {
         newSlots[index] = video;
       }
-      // Auto-expand layout to show all filled slots
+      
+      // Auto-expand layout logic
       if (video !== null) {
+        // Count how many slots will be filled after this update
         const filledCount = newSlots.filter(s => s !== null).length;
-        const newLayout = filledCount <= 1 ? 1 : filledCount <= 2 ? 2 : 4;
-        if (newLayout > layout) {
-          setLayout(newLayout as Layout);
+        
+        // If we are adding a video, ensure layout is big enough
+        // Current layout vs needed layout
+        // 1 video -> layout 1
+        // 2 videos -> layout 2
+        // 3-4 videos -> layout 4
+        
+        let requiredLayout: Layout = 1;
+        if (filledCount > 2) requiredLayout = 4;
+        else if (filledCount > 1) requiredLayout = 2;
+        
+        // Only expand, don't shrink automatically
+        if (requiredLayout > layout) {
+            setLayout(requiredLayout);
         }
       }
       return newSlots;
     });
+
     // Reset sync offset when a new video is loaded into a slot
     setSyncOffsets(prev => {
       const newOffsets = [...prev];
-      newOffsets[index] = 0;
+      if (index >= 0 && index < MAX_SLOTS) {
+          newOffsets[index] = 0;
+      }
       return newOffsets;
+    });
+
+    // Reset zoom level
+    setZoomLevels(prev => {
+        const newLevels = [...prev];
+        if (index >= 0 && index < MAX_SLOTS) {
+          newLevels[index] = 1;
+        }
+        return newLevels;
+    });
+
+    // Reset pan position
+    setPanPositions(prev => {
+        const newPositions = [...prev];
+        if (index >= 0 && index < MAX_SLOTS) {
+          newPositions[index] = {x: 0, y: 0};
+        }
+        return newPositions;
     });
   };
 
@@ -155,6 +211,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const togglePortraitMode = () => setIsPortraitMode(prev => !prev);
   const toggleLoop = () => setIsLoopEnabled(prev => !prev);
   const toggleMute = () => setIsMuted(prev => !prev);
+  
+  const toggleDrawing = () => setIsDrawingEnabled(prev => !prev);
 
   const updateSyncOffset = useCallback((index: number, delta: number) => {
     setSyncOffsets(prev => {
@@ -185,6 +243,20 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       return newPositions;
     });
   };
+  
+  const setDrawingsForVideo = (videoId: string, newDrawings: Drawing[]) => {
+      setDrawings(prev => ({
+          ...prev,
+          [videoId]: newDrawings
+      }));
+  };
+  
+  const clearDrawings = (videoId: string) => {
+      setDrawings(prev => ({
+          ...prev,
+          [videoId]: []
+      }));
+  };
 
   const value = {
     library,
@@ -211,7 +283,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     zoomLevels,
     setZoomLevel,
     panPositions,
-    setPanPosition
+    setPanPosition,
+    
+    // Drawing
+    isDrawingEnabled,
+    toggleDrawing,
+    drawingTool,
+    setDrawingTool,
+    drawingColor,
+    setDrawingColor,
+    drawings,
+    setDrawingsForVideo,
+    clearDrawings
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

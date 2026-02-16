@@ -1,10 +1,10 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAppContext } from '@/contexts/app-context';
 import type { Video } from '@/types';
 import PlayerControls from './player-controls';
 import { cn } from '@/lib/utils';
-import { PlusCircle } from 'lucide-react';
+import { PlusCircle, X } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,6 +12,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import DrawingCanvas, { Drawing } from './drawing-canvas';
 
 interface VideoTileProps {
   video: Video | null;
@@ -26,11 +28,20 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     isSyncEnabled,
     isPortraitMode,
     isLoopEnabled,
-    syncOffsets,
     updateSyncOffset,
     isMuted,
     library,
-    setSlot
+    setSlot,
+    zoomLevels,
+    setZoomLevel,
+    panPositions,
+    setPanPosition,
+    // Drawing
+    isDrawingEnabled,
+    drawingTool,
+    drawingColor,
+    drawings,
+    setDrawingsForVideo
   } = useAppContext();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -39,11 +50,19 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1.0);
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  
+  // Touch handling refs
+  const lastTouchDistance = useRef<number | null>(null);
+  const lastTouchCenter = useRef<{x: number, y: number} | null>(null);
+
   const { toast } = useToast();
+
+  const scale = zoomLevels[index] || 1;
+  const position = panPositions[index] || { x: 0, y: 0 };
+
+  const currentDrawings = video ? (drawings[video.id] || []) : [];
 
   // Handle ref assignment and cleanup
   useEffect(() => {
@@ -51,12 +70,18 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
       videoRefs.current[index] = videoRef.current;
     }
     return () => {
-      // Clean up ref on unmount to prevent stale references in SyncControls
       if (videoRefs.current) {
         videoRefs.current[index] = null;
       }
     };
   }, [index, videoRefs, video]);
+
+  // Reset local state when video changes
+  useEffect(() => {
+      if (video) {
+          setPlaybackRate(1.0);
+      }
+  }, [video]);
 
   // Mute/unmute based on active state and global mute toggle
   useEffect(() => {
@@ -65,14 +90,12 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     videoElement.muted = isMuted || !isActive;
   }, [isActive, isMuted]);
 
-  // Handle all video event listeners, state updates, and looping
-  // When sync is ON, looping is handled by the master clock in SyncControls
+  // Handle video events
   useEffect(() => {
     const videoElement = videoRef.current;
     if (!videoElement || !video) return;
 
     const handleTimeUpdate = () => {
-      // Only handle local looping when sync is OFF
       if (!isSyncEnabled) {
         const now = videoElement.currentTime;
         if (isLoopEnabled && video.trimEnd && now >= video.trimEnd) {
@@ -87,7 +110,6 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
       setCurrentTime(videoElement.currentTime);
     };
 
-    // Loop when video reaches natural end (only when sync is OFF)
     const handleEnded = () => {
       if (!isSyncEnabled && isLoopEnabled) {
         videoElement.currentTime = video.trimStart || 0;
@@ -105,7 +127,6 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     videoElement.addEventListener('play', handlePlay);
     videoElement.addEventListener('pause', handlePause);
 
-    // Initialize state when video changes
     videoElement.currentTime = video.trimStart || 0;
     setCurrentTime(videoElement.currentTime);
     if (videoElement.duration) setDuration(videoElement.duration);
@@ -123,11 +144,8 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const handlePlayPause = () => {
     const videoElement = videoRef.current;
     if (videoElement) {
-      if (videoElement.paused) {
-        videoElement.play();
-      } else {
-        videoElement.pause();
-      }
+      if (videoElement.paused) videoElement.play();
+      else videoElement.pause();
     }
   };
 
@@ -154,11 +172,19 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     toast({ title: 'Video Added', description: `"${selectedVideo.name}" added to slot ${index + 1}.` });
   };
 
+  const handleRemoveVideo = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSlot(index, null);
+    toast({ title: 'Video Removed', description: `Slot ${index + 1} cleared.` });
+  };
+
+  // --- Step Logic for Fine Tuning ---
   const handleStep = (seconds: number) => {
     const videoElement = videoRef.current;
     if (videoElement) {
       if (isSyncEnabled) {
         updateSyncOffset(index, seconds);
+        // We add seconds to current time to visualize the shift immediately
         videoElement.currentTime = videoElement.currentTime + seconds;
       } else {
         const start = video?.trimStart || 0;
@@ -169,79 +195,93 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     }
   };
 
-  // Render helper (returns JSX, NOT a component — avoids unmount/remount on re-render)
-  const renderStepBtn = (seconds: number, size: number) => {
+  const renderStepBtn = (seconds: number, size: number, labelOverride?: string) => {
     const isNeg = seconds < 0;
+    const label = labelOverride || `${isNeg ? '' : '+'}${seconds}s`;
     return (
       <button
-        key={seconds}
+        key={label}
         onClick={(e) => { e.stopPropagation(); handleStep(seconds); }}
-        className="flex-shrink-0 text-primary hover:text-primary/80 active:scale-90 transition-all"
-        title={`${isNeg ? '' : '+'}${seconds}s`}
+        className="flex-shrink-0 text-white/90 hover:text-white hover:scale-110 active:scale-90 transition-all focus:outline-none focus:ring-1 focus:ring-white/50 rounded-full"
+        title={label}
+        aria-label={`Step video ${label}`}
       >
-        <svg width={size} height={size} viewBox="0 0 40 40" fill="currentColor">
-          <circle cx="20" cy="20" r="19" />
-          <rect x="10" y="17.5" width="20" height="5" rx="1" fill="white" />
-          {!isNeg && <rect x="17.5" y="10" width="5" height="20" rx="1" fill="white" />}
-        </svg>
+        <div className="relative flex items-center justify-center bg-black/60 rounded-full px-2 py-1 backdrop-blur-sm border border-white/20 hover:bg-black/80 transition-colors">
+            <span className="font-mono font-bold text-xs" style={{ fontSize: size/2.2 }}>
+                {label}
+            </span>
+        </div>
       </button>
     );
   };
 
+  // --- Zoom and Pan Logic ---
 
-  // Zoom and Pan Handlers
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      // Zoom
-      const zoomSensitivity = 0.001;
-      const newScale = Math.min(Math.max(1, scale - e.deltaY * zoomSensitivity), 5);
-      setScale(newScale);
-      
-      // Reset position if zoomed out
-      if (newScale === 1) {
-        setPosition({ x: 0, y: 0 });
-      }
-    } else {
-      // Pan (if zoomed in)
-       if (scale > 1) {
-          const panSensitivity = 1;
-          const newX = position.x - e.deltaX * panSensitivity;
-          const newY = position.y - e.deltaY * panSensitivity;
+  const handleZoom = useCallback((delta: number, clientX: number, clientY: number) => {
+    if (isDrawingEnabled && isActive) return; // Disable zoom/pan via mouse/wheel when drawing
 
-           // Calculate boundaries
-           const maxX = (containerRef.current?.offsetWidth || 0) * (scale - 1) / 2;
-           const maxY = (containerRef.current?.offsetHeight || 0) * (scale - 1) / 2;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
 
-           setPosition({
-             x: Math.max(-maxX, Math.min(newX, maxX)),
-             y: Math.max(-maxY, Math.min(newY, maxY))
-           });
-       }
+    const newScale = Math.min(Math.max(1, scale + delta), 5);
+
+    if (newScale === 1) {
+      setZoomLevel(index, 1);
+      setPanPosition(index, { x: 0, y: 0 });
+      return;
     }
-  };
+
+    const mouseX = clientX - rect.left - rect.width / 2;
+    const mouseY = clientY - rect.top - rect.height / 2;
+
+    const newX = mouseX - (mouseX - position.x) * (newScale / scale);
+    const newY = mouseY - (mouseY - position.y) * (newScale / scale);
+
+    const maxX = (rect.width * (newScale - 1)) / 2;
+    const maxY = (rect.height * (newScale - 1)) / 2;
+
+    const clampedX = Math.max(-maxX, Math.min(newX, maxX));
+    const clampedY = Math.max(-maxY, Math.min(newY, maxY));
+
+    setZoomLevel(index, newScale);
+    setPanPosition(index, { x: clampedX, y: clampedY });
+  }, [scale, position, index, setZoomLevel, setPanPosition, isDrawingEnabled, isActive]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (isDrawingEnabled && isActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const zoomSensitivity = 0.001;
+    const delta = -e.deltaY * zoomSensitivity;
+    handleZoom(delta, e.clientX, e.clientY);
+  }, [handleZoom, isDrawingEnabled, isActive]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (isDrawingEnabled && isActive) return; // Let DrawingCanvas handle events
     if (scale > 1) {
       setIsDragging(true);
       setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
-      e.stopPropagation(); // Prevent tile selection
+      e.stopPropagation();
     }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (isDrawingEnabled && isActive) return;
     if (isDragging && scale > 1) {
+      e.preventDefault();
       const newX = e.clientX - dragStart.x;
       const newY = e.clientY - dragStart.y;
+      
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
 
-       // Calculate boundaries
-       const maxX = (containerRef.current?.offsetWidth || 0) * (scale - 1) / 2;
-       const maxY = (containerRef.current?.offsetHeight || 0) * (scale - 1) / 2;
+      const maxX = (rect.width * (scale - 1)) / 2;
+      const maxY = (rect.height * (scale - 1)) / 2;
 
-       setPosition({
-         x: Math.max(-maxX, Math.min(newX, maxX)),
-         y: Math.max(-maxY, Math.min(newY, maxY))
-       });
+      setPanPosition(index, {
+        x: Math.max(-maxX, Math.min(newX, maxX)),
+        y: Math.max(-maxY, Math.min(newY, maxY))
+      });
     }
   };
 
@@ -249,33 +289,87 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     setIsDragging(false);
   };
 
-  const handleMouseLeave = () => {
-    setIsDragging(false);
+  // Touch Handlers for Pinch Zoom and Pan
+  const getDistance = (t1: React.Touch, t2: React.Touch) => {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
   };
 
+  const getCenter = (t1: React.Touch, t2: React.Touch) => {
+    return {
+      x: (t1.clientX + t2.clientX) / 2,
+      y: (t1.clientY + t2.clientY) / 2
+    };
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (isDrawingEnabled && isActive) return;
+
+    if (e.touches.length === 2) {
+      const dist = getDistance(e.touches[0], e.touches[1]);
+      lastTouchDistance.current = dist;
+      lastTouchCenter.current = getCenter(e.touches[0], e.touches[1]);
+    } else if (e.touches.length === 1 && scale > 1) {
+      setIsDragging(true);
+      setDragStart({ x: e.touches[0].clientX - position.x, y: e.touches[0].clientY - position.y });
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (isDrawingEnabled && isActive) return;
+
+    if (e.touches.length === 2 && lastTouchDistance.current !== null) {
+      e.preventDefault(); // Prevent page scroll/zoom
+      const dist = getDistance(e.touches[0], e.touches[1]);
+      const center = getCenter(e.touches[0], e.touches[1]);
+      const scaleFactor = dist / lastTouchDistance.current;
+      const delta = (scale * scaleFactor) - scale;
+      handleZoom(delta, center.x, center.y);
+      lastTouchDistance.current = dist;
+      lastTouchCenter.current = center;
+    } else if (e.touches.length === 1 && isDragging && scale > 1) {
+       e.preventDefault();
+       const newX = e.touches[0].clientX - dragStart.x;
+       const newY = e.touches[0].clientY - dragStart.y;
+       const rect = containerRef.current?.getBoundingClientRect();
+       if (!rect) return;
+       const maxX = (rect.width * (scale - 1)) / 2;
+       const maxY = (rect.height * (scale - 1)) / 2;
+       setPanPosition(index, {
+         x: Math.max(-maxX, Math.min(newX, maxX)),
+         y: Math.max(-maxY, Math.min(newY, maxY))
+       });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    lastTouchDistance.current = null;
+    lastTouchCenter.current = null;
+    setIsDragging(false);
+  };
 
   if (!video) {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <div
-            suppressHydrationWarning
             className={cn(
-              "bg-muted/50 border-2 border-dashed rounded-lg flex items-center justify-center cursor-pointer hover:border-primary transition-colors max-h-full",
+              "bg-muted/50 border-2 border-dashed rounded-lg flex items-center justify-center cursor-pointer hover:border-primary transition-colors max-h-full relative group",
               isPortraitMode ? 'aspect-[9/16]' : 'aspect-video'
             )}
           >
-            <div className="text-center text-muted-foreground">
-              <PlusCircle className="mx-auto h-12 w-12" />
-              <p className="mt-2 font-medium">Add Video</p>
+            <div className="text-center text-muted-foreground group-hover:text-primary transition-colors">
+              <PlusCircle className="mx-auto h-12 w-12 mb-2 opacity-50 group-hover:opacity-100 transition-opacity" />
+              <p className="font-medium text-sm">Add Video</p>
             </div>
           </div>
         </DropdownMenuTrigger>
-        <DropdownMenuContent>
+        <DropdownMenuContent align="center" className="w-56">
           {library.length > 0 ? (
             library.map(libVideo => (
-              <DropdownMenuItem key={libVideo.id} onClick={() => handleSelectVideo(libVideo)}>
-                {libVideo.name}
+              <DropdownMenuItem key={libVideo.id} onClick={() => handleSelectVideo(libVideo)} className="cursor-pointer">
+                <span className="truncate">{libVideo.name}</span>
               </DropdownMenuItem>
             ))
           ) : (
@@ -290,23 +384,37 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     <div
       ref={containerRef}
       className={cn(
-        'relative bg-black rounded-lg overflow-hidden flex flex-col transition-all duration-300',
+        'relative bg-black rounded-lg overflow-hidden flex flex-col transition-all duration-300 group',
         isPortraitMode ? 'h-full aspect-[9/16]' : 'w-full h-full',
-        isActive ? 'ring-4 ring-primary shadow-2xl' : 'ring-2 ring-transparent'
+        isActive ? 'ring-2 ring-primary shadow-lg z-10' : 'ring-1 ring-white/10 hover:ring-white/30'
       )}
       onClick={() => setActiveTileIndex(index)}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseLeave}
+      onMouseLeave={handleMouseUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
     >
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute top-2 right-2 z-30 h-8 w-8 bg-black/50 hover:bg-destructive/90 text-white opacity-0 group-hover:opacity-100 transition-opacity rounded-full backdrop-blur-sm"
+        onClick={handleRemoveVideo}
+        title="Remove video from slot"
+      >
+        <X className="h-4 w-4" />
+      </Button>
+
       <div className="flex-1 min-h-0 overflow-hidden relative">
         <video
           ref={videoRef}
           src={video.url}
           className={cn(
-            'w-full h-full',
+            'w-full h-full touch-none',
             isPortraitMode ? 'object-cover' : 'object-contain',
              isDragging ? 'cursor-grabbing' : (scale > 1 ? 'cursor-grab' : 'cursor-default')
           )}
@@ -316,29 +424,50 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
           }}
           playsInline
         />
+        
+        {/* Drawing Canvas Overlay */}
+        {video && (
+             <DrawingCanvas
+                width={containerRef.current?.clientWidth || 0}
+                height={containerRef.current?.clientHeight || 0}
+                scale={scale}
+                position={position}
+                tool={drawingTool}
+                color={drawingColor}
+                isActive={isDrawingEnabled && isActive}
+                drawings={currentDrawings}
+                onDrawingsChange={(newDrawings) => setDrawingsForVideo(video.id, newDrawings)}
+             />
+        )}
       </div>
-      {/* Step buttons bar */}
-      <div className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-black/70 z-10" onClick={e => e.stopPropagation()}>
-        {renderStepBtn(-0.5, 32)}
-        {renderStepBtn(-0.25, 26)}
-        {renderStepBtn(-0.15, 20)}
-        <div className="w-6" />
-        {renderStepBtn(0.15, 20)}
-        {renderStepBtn(0.25, 26)}
-        {renderStepBtn(0.5, 32)}
-      </div>
-      <div className="z-10 bg-black/70">
-          <PlayerControls
-            isPlaying={isPlaying}
-            onPlayPause={handlePlayPause}
-            currentTime={currentTime}
-            duration={duration}
-            onSeek={handleSeek}
-            playbackRate={playbackRate}
-            onRateChange={handleRateChange}
-            isSyncEnabled={isSyncEnabled}
-            variant="static"
-          />
+      
+      {/* Controls Overlay */}
+      <div className="z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent pb-1 pt-4 px-2 flex flex-col gap-2">
+        {/* Step buttons bar - Added Back */}
+        <div 
+          className="flex items-center justify-center gap-2 py-1" 
+          onClick={e => e.stopPropagation()}
+        >
+          {renderStepBtn(-0.5, 28)}
+          {renderStepBtn(-0.1, 28)}
+          {renderStepBtn(-1/30, 28, '-1f')}
+          <div className="w-px h-4 bg-white/20 mx-1" />
+          {renderStepBtn(1/30, 28, '+1f')}
+          {renderStepBtn(0.1, 28)}
+          {renderStepBtn(0.5, 28)}
+        </div>
+
+        <PlayerControls
+          isPlaying={isPlaying}
+          onPlayPause={handlePlayPause}
+          currentTime={currentTime}
+          duration={duration}
+          onSeek={handleSeek}
+          playbackRate={playbackRate}
+          onRateChange={handleRateChange}
+          isSyncEnabled={isSyncEnabled}
+          variant="static"
+        />
       </div>
     </div>
   );

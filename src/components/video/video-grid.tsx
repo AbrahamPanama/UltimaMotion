@@ -4,209 +4,141 @@ import VideoTile from './video-tile';
 import { cn } from '@/lib/utils';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import PlayerControls from './player-controls';
+import { Button } from '@/components/ui/button';
 
-function SyncControls() {
-    const { videoRefs, slots, isSyncEnabled, isLoopEnabled, syncOffsets } = useAppContext();
+export default function VideoGrid() {
+    const { 
+        layout, 
+        slots, 
+        activeTileIndex, 
+        isSyncEnabled, 
+        videoRefs,
+        isLoopEnabled,
+        syncOffsets,
+        updateSyncOffset 
+    } = useAppContext();
+
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [playbackRate, setPlaybackRate] = useState(1.0);
-
+    
+    // Use refs for animation frame loop to avoid stale closures
     const rafRef = useRef<number | null>(null);
-    const startTimeRef = useRef<number | null>(null);
-    const startOffsetRef = useRef<number>(0);
-    const lastUIUpdateRef = useRef<number>(0);
+    const lastTimeRef = useRef<number>(0);
 
-    // Store volatile values in refs so tick never needs to be recreated
-    const playbackRateRef = useRef(playbackRate);
-    const slotsRef = useRef(slots);
-    const syncOffsetsRef = useRef(syncOffsets);
-    const isLoopEnabledRef = useRef(isLoopEnabled);
-    playbackRateRef.current = playbackRate;
-    slotsRef.current = slots;
-    syncOffsetsRef.current = syncOffsets;
-    isLoopEnabledRef.current = isLoopEnabled;
-
-    // Stable helper — no deps that change
     const getActiveVideos = useCallback(() => {
         return videoRefs.current
-            .map((video, index) => ({ video, index }))
-            .filter((item): item is { video: HTMLVideoElement; index: number } =>
-                item.video !== null && item.video.isConnected
+            .map((video, index) => ({ video, index, slot: slots[index] }))
+            .filter((item): item is { video: HTMLVideoElement; index: number; slot: any } => 
+                item.video !== null && item.slot !== null
             );
-    }, [videoRefs]);
+    }, [videoRefs, slots]);
 
-    const getLoopDuration = useCallback(() => {
-        const activeVideos = getActiveVideos();
-        if (activeVideos.length === 0) return 0;
-        const lengths = activeVideos.map(({ index }) => {
-            const slot = slotsRef.current[index];
-            const videoEl = videoRefs.current[index];
-            if (!slot || !videoEl) return 0;
+    // Calculate the effective duration of the sync session (shortest loop or max length)
+    const getSyncDuration = useCallback(() => {
+        const active = getActiveVideos();
+        if (active.length === 0) return 0;
+        
+        // Find the minimum duration among active clips to loop seamlessly?
+        // Or maximum to play all? Let's use maximum for now, but loop based on shortest?
+        // Usually sync play means play until the shortest one ends, then loop.
+        const durations = active.map(({ video, slot }) => {
             const start = slot.trimStart || 0;
-            const end = slot.trimEnd || videoEl.duration || 0;
+            const end = slot.trimEnd || video.duration;
             return Math.max(0, end - start);
-        }).filter(l => l > 0);
-        if (lengths.length === 0) return 0;
-        return Math.min(...lengths);
-    }, [getActiveVideos, videoRefs]);
-
-    // Stable tick — reads everything from refs, never recreated
-    const tick = useCallback(() => {
-        const activeVideos = getActiveVideos();
-        if (activeVideos.length === 0) {
-            rafRef.current = null;
-            return;
-        }
-
-        const loopDuration = getLoopDuration();
-        if (loopDuration <= 0) {
-            rafRef.current = requestAnimationFrame(tick);
-            return;
-        }
-
-        const now = performance.now();
-        const elapsedMs = now - (startTimeRef.current || now);
-        const elapsedSec = (elapsedMs / 1000) * playbackRateRef.current;
-        let t_loop = startOffsetRef.current + elapsedSec;
-
-        // Handle looping
-        if (isLoopEnabledRef.current && t_loop >= loopDuration) {
-            t_loop = t_loop % loopDuration;
-            startTimeRef.current = now;
-            startOffsetRef.current = t_loop;
-        } else if (!isLoopEnabledRef.current && t_loop >= loopDuration) {
-            t_loop = loopDuration;
-            activeVideos.forEach(({ video }) => video.pause());
-            setIsPlaying(false);
-            rafRef.current = null;
-            return;
-        }
-
-        // Apply position to each video with its sync offset
-        const offsets = syncOffsetsRef.current;
-        const currentSlots = slotsRef.current;
-        activeVideos.forEach(({ video, index }) => {
-            const slot = currentSlots[index];
-            if (!slot) return;
-            const trimStart = slot.trimStart || 0;
-            const target = trimStart + (offsets[index] || 0) + t_loop;
-            if (Math.abs(video.currentTime - target) > 0.05) {
-                video.currentTime = target;
-            }
         });
+        
+        return Math.max(...durations) || 0; 
+    }, [getActiveVideos]);
 
-        // Throttle React state updates to ~4 times/second
-        if (now - lastUIUpdateRef.current > 250) {
-            setCurrentTime(t_loop);
-            setDuration(loopDuration);
-            lastUIUpdateRef.current = now;
+
+    // Sync Loop
+    const tick = useCallback(() => {
+        if (!isPlaying) return;
+
+        const active = getActiveVideos();
+        if (active.length === 0) {
+            setIsPlaying(false);
+            return;
+        }
+
+        // Just update UI current time from the first active video for display
+        // In a real sync engine we'd drive videos from a master clock. 
+        // Here we just let them play and periodically re-sync if drifted?
+        // For simplicity, let's just read the time of the first video.
+        
+        const master = active[0];
+        if (master) {
+             const start = master.slot.trimStart || 0;
+             const relativeTime = master.video.currentTime - start - (syncOffsets[master.index] || 0);
+             setCurrentTime(relativeTime);
+             
+             // Check for loop
+             const syncDur = getSyncDuration();
+             if (isLoopEnabled && relativeTime >= syncDur) {
+                 // Reset all
+                 active.forEach(({ video, index, slot }) => {
+                     const s = slot.trimStart || 0;
+                     const offset = syncOffsets[index] || 0;
+                     video.currentTime = s + offset;
+                     video.play().catch(() => {});
+                 });
+             }
         }
 
         rafRef.current = requestAnimationFrame(tick);
-    }, [getActiveVideos, getLoopDuration]);
+    }, [isPlaying, getActiveVideos, isLoopEnabled, getSyncDuration, syncOffsets]);
 
-    // Start/stop the rAF loop — tick is stable so this rarely re-runs
     useEffect(() => {
-        if (isPlaying && isSyncEnabled) {
-            if (startTimeRef.current === null) {
-                startTimeRef.current = performance.now();
-            }
+        if (isSyncEnabled && isPlaying) {
             rafRef.current = requestAnimationFrame(tick);
+        } else {
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
         }
         return () => {
-            if (rafRef.current !== null) {
-                cancelAnimationFrame(rafRef.current);
-                rafRef.current = null;
-            }
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
         };
-    }, [isPlaying, isSyncEnabled, tick]);
+    }, [isSyncEnabled, isPlaying, tick]);
+
+    // Update duration when videos change
+    useEffect(() => {
+        if (isSyncEnabled) {
+            setDuration(getSyncDuration());
+        }
+    }, [isSyncEnabled, getSyncDuration, slots]);
+
 
     const handlePlayPause = () => {
-        const activeVideos = getActiveVideos();
-        const shouldPlay = !isPlaying;
+        const active = getActiveVideos();
+        if (active.length === 0) return;
 
-        if (shouldPlay) {
-            startTimeRef.current = performance.now();
-
-            activeVideos.forEach(({ video }) => {
-                video.play().catch(e => console.error("Sync play failed:", e));
-            });
+        if (isPlaying) {
+            active.forEach(({ video }) => video.pause());
+            setIsPlaying(false);
         } else {
-            if (startTimeRef.current !== null) {
-                const elapsedMs = performance.now() - startTimeRef.current;
-                const elapsedSec = (elapsedMs / 1000) * playbackRateRef.current;
-                const loopDuration = getLoopDuration();
-                if (loopDuration > 0 && isLoopEnabledRef.current) {
-                    startOffsetRef.current = (startOffsetRef.current + elapsedSec) % loopDuration;
-                } else {
-                    startOffsetRef.current = startOffsetRef.current + elapsedSec;
-                }
-            }
-            startTimeRef.current = null;
-
-            activeVideos.forEach(({ video }) => video.pause());
+            active.forEach(({ video }) => video.play().catch(e => console.error("Play error", e)));
+            setIsPlaying(true);
         }
-
-        setIsPlaying(shouldPlay);
     };
 
     const handleSeek = (time: number) => {
-        startOffsetRef.current = time;
-        startTimeRef.current = performance.now();
-
-        const activeVideos = getActiveVideos();
-        const offsets = syncOffsetsRef.current;
-        const currentSlots = slotsRef.current;
-        activeVideos.forEach(({ video, index }) => {
-            const slot = currentSlots[index];
-            if (!slot) return;
-            const trimStart = slot.trimStart || 0;
-            video.currentTime = trimStart + (offsets[index] || 0) + time;
+        const active = getActiveVideos();
+        active.forEach(({ video, index, slot }) => {
+            const start = slot.trimStart || 0;
+            const offset = syncOffsets[index] || 0;
+            video.currentTime = start + offset + time;
         });
         setCurrentTime(time);
     };
 
     const handleRateChange = (rate: number) => {
-        if (startTimeRef.current !== null && isPlaying) {
-            const elapsedMs = performance.now() - startTimeRef.current;
-            const elapsedSec = (elapsedMs / 1000) * playbackRateRef.current;
-            const loopDuration = getLoopDuration();
-            if (loopDuration > 0 && isLoopEnabledRef.current) {
-                startOffsetRef.current = (startOffsetRef.current + elapsedSec) % loopDuration;
-            } else {
-                startOffsetRef.current = startOffsetRef.current + elapsedSec;
-            }
-            startTimeRef.current = performance.now();
-        }
-
-        const activeVideos = getActiveVideos();
-        activeVideos.forEach(({ video }) => {
+        const active = getActiveVideos();
+        active.forEach(({ video }) => {
             video.playbackRate = rate;
         });
         setPlaybackRate(rate);
     };
-
-    return (
-        <div className="bg-card p-2 border rounded-lg shadow-sm mt-auto">
-            <PlayerControls
-                isPlaying={isPlaying}
-                onPlayPause={handlePlayPause}
-                currentTime={currentTime}
-                duration={duration}
-                onSeek={handleSeek}
-                playbackRate={playbackRate}
-                onRateChange={handleRateChange}
-                isSyncEnabled={false}
-                variant="static"
-            />
-        </div>
-    );
-}
-
-
-export default function VideoGrid() {
-    const { layout, slots, activeTileIndex, isSyncEnabled } = useAppContext();
 
     const gridClasses = {
         1: 'grid-cols-1',
@@ -227,7 +159,23 @@ export default function VideoGrid() {
                     </div>
                 ))}
             </div>
-            {isSyncEnabled && <SyncControls />}
+
+            {/* Global Sync Controls Bar */}
+            {isSyncEnabled && (
+                 <div className="bg-card p-3 border rounded-lg shadow-sm mt-auto flex flex-col gap-2">
+                    <PlayerControls
+                        isPlaying={isPlaying}
+                        onPlayPause={handlePlayPause}
+                        currentTime={currentTime}
+                        duration={duration}
+                        onSeek={handleSeek}
+                        playbackRate={playbackRate}
+                        onRateChange={handleRateChange}
+                        isSyncEnabled={false} // Pass false so it renders normal controls, not the "Sync Active" badge
+                        variant="static"
+                    />
+                </div>
+            )}
         </div>
     );
 }
