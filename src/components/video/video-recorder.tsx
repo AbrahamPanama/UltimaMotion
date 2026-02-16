@@ -48,14 +48,18 @@ export function VideoRecorder() {
     }
   }, []);
 
-  const startPreview = useCallback(async (facing: 'environment' | 'user') => {
+  const startPreview = useCallback(async (facing: 'environment' | 'user', portrait?: boolean) => {
     stopStream();
     try {
+      // Flip dimensions based on device orientation so the camera delivers the right stream
+      const wIdeal = portrait ? 1080 : 1920;
+      const hIdeal = portrait ? 1920 : 1080;
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: facing },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: wIdeal },
+          height: { ideal: hIdeal },
           frameRate: { ideal: 60, max: 60 },
         },
         audio: true,
@@ -80,7 +84,7 @@ export function VideoRecorder() {
     setError(null);
     recordedChunksRef.current = [];
 
-    const stream = streamRef.current || await startPreview(facingMode);
+    const stream = streamRef.current || await startPreview(facingMode, isPortrait);
     if (!stream) return;
 
     mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'video/webm' });
@@ -114,13 +118,13 @@ export function VideoRecorder() {
     if (isRecording) return;
     const newFacing = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(newFacing);
-    await startPreview(newFacing);
-  }, [facingMode, isRecording, startPreview]);
+    await startPreview(newFacing, isPortrait);
+  }, [facingMode, isRecording, startPreview, isPortrait]);
 
   const handleOpen = useCallback(async () => {
     setIsOpen(true);
-    setTimeout(() => startPreview(facingMode), 100);
-  }, [facingMode, startPreview]);
+    setTimeout(() => startPreview(facingMode, isPortrait), 100);
+  }, [facingMode, startPreview, isPortrait]);
 
   const handleSaveTrimmed = async (name: string, trimStart: number, trimEnd: number) => {
     if (!recordedBlob) return;
