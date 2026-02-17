@@ -11,6 +11,28 @@
  */
 
 /**
+ * Returns the best supported MIME type for MediaRecorder.
+ * iOS Safari only supports video/mp4; Chrome/Firefox prefer video/webm.
+ */
+export function getSupportedMimeType(): string {
+    if (typeof MediaRecorder === 'undefined') return '';
+
+    const candidates = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4',
+    ];
+
+    for (const mime of candidates) {
+        if (MediaRecorder.isTypeSupported(mime)) {
+            return mime;
+        }
+    }
+    return ''; // let the browser pick its default
+}
+
+/**
  * Extracts a single frame from a video file/blob and returns it as a data URL.
  */
 export async function extractThumbnail(

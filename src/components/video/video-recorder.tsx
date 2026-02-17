@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Video as VideoIcon, Mic, XCircle, SwitchCamera } from 'lucide-react';
 import { useAppContext } from '@/contexts/app-context';
 import { TrimDialog } from './trim-dialog';
+import { getSupportedMimeType, extractThumbnail } from '@/lib/video-utils';
 
 export function VideoRecorder() {
   const { addVideoToLibrary } = useAppContext();
@@ -81,7 +82,9 @@ export function VideoRecorder() {
     const stream = streamRef.current || await startPreview(facingMode);
     if (!stream) return;
 
-    mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'video/webm' });
+    const mimeType = getSupportedMimeType();
+    const recorderOptions: MediaRecorderOptions = mimeType ? { mimeType } : {};
+    mediaRecorderRef.current = new MediaRecorder(stream, recorderOptions);
 
     mediaRecorderRef.current.ondataavailable = (event) => {
       if (event.data.size > 0) {
@@ -90,7 +93,9 @@ export function VideoRecorder() {
     };
 
     mediaRecorderRef.current.onstop = () => {
-      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      // Use the actual MIME type from the recorder (not hardcoded)
+      const actualType = mediaRecorderRef.current?.mimeType || mimeType || 'video/mp4';
+      const blob = new Blob(recordedChunksRef.current, { type: actualType });
       setRecordedBlob(blob);
       setShowTrimDialog(true);
       setIsOpen(false);
@@ -123,19 +128,8 @@ export function VideoRecorder() {
   const handleSaveTrimmed = async (name: string, trimStart: number, trimEnd: number) => {
     if (!recordedBlob) return;
 
-    const getDuration = (blob: Blob): Promise<number> => {
-      return new Promise((resolve) => {
-        const tempVideo = document.createElement('video');
-        tempVideo.preload = 'metadata';
-        tempVideo.onloadedmetadata = () => {
-          resolve(tempVideo.duration);
-          URL.revokeObjectURL(tempVideo.src);
-        };
-        tempVideo.src = URL.createObjectURL(blob);
-      });
-    };
-
-    const duration = await getDuration(recordedBlob);
+    // Use extractThumbnail to get both duration and a thumbnail frame (iOS-compatible)
+    const { duration, thumbnail } = await extractThumbnail(recordedBlob, trimStart);
 
     await addVideoToLibrary({
       name: name,
@@ -143,6 +137,7 @@ export function VideoRecorder() {
       duration: duration,
       trimStart,
       trimEnd,
+      thumbnail,
     });
     setRecordedBlob(null);
     recordedChunksRef.current = [];

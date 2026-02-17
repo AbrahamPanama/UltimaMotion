@@ -100,7 +100,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const addVideoToLibrary = async (videoData: Omit<Video, 'id' | 'url' | 'createdAt'>) => {
     try {
-      const id = crypto.randomUUID();
+      // crypto.randomUUID() requires HTTPS on iOS Safari; fallback for HTTP dev
+      const id = typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : ([1e7].toString() + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+          (Number(c) ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(c) / 4)))).toString(16)
+        );
       const newVideo: Video = {
         ...videoData,
         id,
