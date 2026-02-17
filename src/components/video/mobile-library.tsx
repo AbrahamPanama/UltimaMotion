@@ -78,7 +78,7 @@ export function MobileLibrary() {
 
   return (
     <>
-      <div className="bg-card border-t border-border flex-shrink-0">
+      <div className="bg-card border-t border-border flex-shrink-0 pb-[env(safe-area-inset-bottom)]">
         {/* Header Row */}
         <div className="flex items-center justify-between px-3 py-2">
           <div className="flex items-center gap-2">
@@ -147,11 +147,11 @@ export function MobileLibrary() {
                     <div className="absolute inset-0 bg-black/0 group-active:bg-black/20 transition-colors" />
 
                     {/* Quick Actions */}
-                    <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-active:opacity-100 transition-opacity">
+                    <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-5 w-5 bg-black/60 text-white hover:text-white hover:bg-black/80 rounded"
+                        className="h-7 w-7 bg-black/60 text-white hover:text-white hover:bg-black/80 rounded"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAddToGrid(video);
@@ -163,7 +163,7 @@ export function MobileLibrary() {
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-5 w-5 bg-black/60 text-red-400 hover:text-red-300 hover:bg-black/80 rounded"
+                        className="h-7 w-7 bg-black/60 text-red-400 hover:text-red-300 hover:bg-black/80 rounded"
                         onClick={(e) => {
                           e.stopPropagation();
                           removeVideoFromLibrary(video.id);

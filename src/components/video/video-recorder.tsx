@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -26,6 +26,7 @@ export function VideoRecorder() {
   const videoPreviewRef = useRef<HTMLVideoElement | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { toast } = useToast();
 
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
@@ -122,8 +123,23 @@ export function VideoRecorder() {
 
   const handleOpen = useCallback(async () => {
     setIsOpen(true);
-    setTimeout(() => startPreview(facingMode), 100);
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+    }
+    previewTimerRef.current = setTimeout(() => {
+      startPreview(facingMode);
+      previewTimerRef.current = null;
+    }, 100);
   }, [facingMode, startPreview]);
+
+  useEffect(() => {
+    return () => {
+      if (previewTimerRef.current) {
+        clearTimeout(previewTimerRef.current);
+      }
+      stopStream();
+    };
+  }, [stopStream]);
 
   const handleSaveTrimmed = async (name: string, trimStart: number, trimEnd: number) => {
     if (!recordedBlob) return;
@@ -144,6 +160,10 @@ export function VideoRecorder() {
   };
 
   const handleCloseRecorder = () => {
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
     if (isRecording) {
       stopRecording();
     }

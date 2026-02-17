@@ -126,7 +126,7 @@ export default function DrawingCanvas({
     // Render helpers
     const renderDrawing = (d: Drawing, isCurrent = false) => {
         const key = isCurrent ? 'current' : d.id;
-        const style = {
+        const style: React.CSSProperties = {
             stroke: d.color,
             strokeWidth: d.strokeWidth / scale, // Scale stroke width so it stays constant relative to screen? Or constant relative to video? 
             // If we want constant screen thickness, divide by scale. If constant video thickness, leave as is.

@@ -4,7 +4,7 @@ import VideoTile from './video-tile';
 import { cn } from '@/lib/utils';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import PlayerControls from './player-controls';
-import { Button } from '@/components/ui/button';
+import type { Video } from '@/types';
 
 export default function VideoGrid() {
     const { 
@@ -14,8 +14,7 @@ export default function VideoGrid() {
         isSyncEnabled, 
         videoRefs,
         isLoopEnabled,
-        syncOffsets,
-        updateSyncOffset 
+        syncOffsets
     } = useAppContext();
 
     const [isPlaying, setIsPlaying] = useState(false);
@@ -25,15 +24,26 @@ export default function VideoGrid() {
     
     // Use refs for animation frame loop to avoid stale closures
     const rafRef = useRef<number | null>(null);
-    const lastTimeRef = useRef<number>(0);
 
     const getActiveVideos = useCallback(() => {
         return videoRefs.current
             .map((video, index) => ({ video, index, slot: slots[index] }))
-            .filter((item): item is { video: HTMLVideoElement; index: number; slot: any } => 
+            .filter((item): item is { video: HTMLVideoElement; index: number; slot: Video } =>
                 item.video !== null && item.slot !== null
             );
     }, [videoRefs, slots]);
+
+    const getTrimBounds = useCallback((slot: Video, video: HTMLVideoElement) => {
+        const start = slot.trimStart ?? 0;
+        const trimEnd = slot.trimEnd ?? video.duration;
+        const end = Number.isFinite(trimEnd) ? trimEnd : start;
+        return { start, end: Math.max(start, end) };
+    }, []);
+
+    const clampToTrim = useCallback((time: number, slot: Video, video: HTMLVideoElement) => {
+        const { start, end } = getTrimBounds(slot, video);
+        return Math.max(start, Math.min(time, end));
+    }, [getTrimBounds]);
 
     // Calculate the effective duration of the sync session (shortest loop or max length)
     const getSyncDuration = useCallback(() => {
@@ -43,14 +53,17 @@ export default function VideoGrid() {
         // Find the minimum duration among active clips to loop seamlessly?
         // Or maximum to play all? Let's use maximum for now, but loop based on shortest?
         // Usually sync play means play until the shortest one ends, then loop.
-        const durations = active.map(({ video, slot }) => {
-            const start = slot.trimStart || 0;
-            const end = slot.trimEnd || video.duration;
-            return Math.max(0, end - start);
-        });
-        
-        return Math.max(...durations) || 0; 
-    }, [getActiveVideos]);
+        const durations = active
+            .map(({ video, index, slot }) => {
+                const { start, end } = getTrimBounds(slot, video);
+                const offset = syncOffsets[index] || 0;
+                const effectiveStart = clampToTrim(start + offset, slot, video);
+                return Math.max(0, end - effectiveStart);
+            })
+            .filter((value) => value > 0);
+
+        return durations.length ? Math.min(...durations) : 0;
+    }, [clampToTrim, getActiveVideos, getTrimBounds, syncOffsets]);
 
 
     // Sync Loop
@@ -70,25 +83,27 @@ export default function VideoGrid() {
         
         const master = active[0];
         if (master) {
-             const start = master.slot.trimStart || 0;
-             const relativeTime = master.video.currentTime - start - (syncOffsets[master.index] || 0);
-             setCurrentTime(relativeTime);
+             const { start } = getTrimBounds(master.slot, master.video);
+             const offset = syncOffsets[master.index] || 0;
+             const masterStart = clampToTrim(start + offset, master.slot, master.video);
+             const relativeTime = master.video.currentTime - masterStart;
+             setCurrentTime(Math.max(0, relativeTime));
              
              // Check for loop
              const syncDur = getSyncDuration();
-             if (isLoopEnabled && relativeTime >= syncDur) {
+             if (isLoopEnabled && syncDur > 0 && relativeTime >= syncDur) {
                  // Reset all
                  active.forEach(({ video, index, slot }) => {
-                     const s = slot.trimStart || 0;
-                     const offset = syncOffsets[index] || 0;
-                     video.currentTime = s + offset;
+                     const { start } = getTrimBounds(slot, video);
+                     const tileOffset = syncOffsets[index] || 0;
+                     video.currentTime = clampToTrim(start + tileOffset, slot, video);
                      video.play().catch(() => {});
                  });
              }
         }
 
         rafRef.current = requestAnimationFrame(tick);
-    }, [isPlaying, getActiveVideos, isLoopEnabled, getSyncDuration, syncOffsets]);
+    }, [clampToTrim, getActiveVideos, getSyncDuration, getTrimBounds, isLoopEnabled, isPlaying, syncOffsets]);
 
     useEffect(() => {
         if (isSyncEnabled && isPlaying) {
@@ -124,12 +139,15 @@ export default function VideoGrid() {
 
     const handleSeek = (time: number) => {
         const active = getActiveVideos();
+        const syncDuration = getSyncDuration();
+        const clampedTime = syncDuration > 0 ? Math.max(0, Math.min(time, syncDuration)) : Math.max(0, time);
+
         active.forEach(({ video, index, slot }) => {
-            const start = slot.trimStart || 0;
+            const { start } = getTrimBounds(slot, video);
             const offset = syncOffsets[index] || 0;
-            video.currentTime = start + offset + time;
+            video.currentTime = clampToTrim(start + offset + clampedTime, slot, video);
         });
-        setCurrentTime(time);
+        setCurrentTime(clampedTime);
     };
 
     const handleRateChange = (rate: number) => {

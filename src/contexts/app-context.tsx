@@ -71,10 +71,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [activeTileIndex, setActiveTileIndex] = useState<number | null>(0);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
+  const libraryRef = useRef<Video[]>([]);
   const { toast } = useToast();
 
   const [zoomLevels, setZoomLevels] = useState<number[]>(Array(MAX_SLOTS).fill(1));
-  const [panPositions, setPanPositions] = useState<{ x: number, y: number }[]>(Array(MAX_SLOTS).fill({ x: 0, y: 0 }));
+  const [panPositions, setPanPositions] = useState<{ x: number, y: number }[]>(
+    Array.from({ length: MAX_SLOTS }, () => ({ x: 0, y: 0 }))
+  );
 
   // Drawing state
   const [isDrawingEnabled, setIsDrawingEnabled] = useState<boolean>(false);
@@ -97,6 +100,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     loadLibrary();
   }, [loadLibrary]);
+
+  useEffect(() => {
+    libraryRef.current = library;
+  }, [library]);
+
+  useEffect(() => {
+    return () => {
+      libraryRef.current.forEach((video) => URL.revokeObjectURL(video.url));
+    };
+  }, []);
 
   const addVideoToLibrary = async (videoData: Omit<Video, 'id' | 'url' | 'createdAt'>) => {
     try {

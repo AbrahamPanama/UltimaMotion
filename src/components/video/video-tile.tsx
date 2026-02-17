@@ -29,6 +29,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     isPortraitMode,
     isLoopEnabled,
     updateSyncOffset,
+    syncOffsets,
     isMuted,
     library,
     setSlot,
@@ -154,7 +155,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const handlePlayPause = () => {
     const videoElement = videoRef.current;
     if (videoElement) {
-      if (videoElement.paused) videoElement.play();
+      if (videoElement.paused) videoElement.play().catch(() => {});
       else videoElement.pause();
     }
   };
@@ -195,13 +196,18 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const handleStep = (seconds: number) => {
     const videoElement = videoRef.current;
     if (videoElement) {
-      const start = video?.trimStart || 0;
-      const end = video?.trimEnd || videoElement.duration;
+      const start = video?.trimStart ?? 0;
+      const trimEnd = video?.trimEnd ?? videoElement.duration;
+      const end = Number.isFinite(trimEnd) ? Math.max(start, trimEnd) : start;
+      const clampTime = (time: number) => Math.max(start, Math.min(time, end));
+
       if (isSyncEnabled) {
-        updateSyncOffset(index, seconds);
-        videoElement.currentTime = videoElement.currentTime + seconds;
+        const currentOffset = syncOffsets[index] ?? 0;
+        const nextOffset = clampTime(start + currentOffset + seconds) - start;
+        updateSyncOffset(index, nextOffset - currentOffset);
+        videoElement.currentTime = clampTime(videoElement.currentTime + seconds);
       } else {
-        videoElement.currentTime = Math.max(start, Math.min(videoElement.currentTime + seconds, end));
+        videoElement.currentTime = clampTime(videoElement.currentTime + seconds);
       }
       setCurrentTime(Math.max(0, videoElement.currentTime - start));
     }
@@ -414,9 +420,10 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
       <Button
         variant="ghost"
         size="icon"
-        className="absolute top-2 right-2 z-30 h-8 w-8 bg-black/50 hover:bg-destructive/90 text-white opacity-0 group-hover:opacity-100 transition-opacity rounded-full backdrop-blur-sm"
+        className="absolute top-2 right-2 z-30 h-10 w-10 bg-black/55 hover:bg-destructive/90 text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity rounded-full backdrop-blur-sm"
         onClick={handleRemoveVideo}
         title="Remove video from slot"
+        aria-label="Remove video from slot"
       >
         <X className="h-4 w-4" />
       </Button>
