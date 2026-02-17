@@ -57,6 +57,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   // Touch handling refs
   const lastTouchDistance = useRef<number | null>(null);
   const lastTouchCenter = useRef<{ x: number, y: number } | null>(null);
+  const wasPlayingBeforeHiddenRef = useRef(false);
 
   const { toast } = useToast();
 
@@ -67,15 +68,84 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
 
   // Handle ref assignment and cleanup
   useEffect(() => {
-    if (videoRefs.current) {
-      videoRefs.current[index] = videoRef.current;
+    const refs = videoRefs.current;
+    if (refs) {
+      refs[index] = videoRef.current;
     }
     return () => {
-      if (videoRefs.current) {
-        videoRefs.current[index] = null;
+      if (refs) {
+        refs[index] = null;
       }
     };
   }, [index, videoRefs, video]);
+
+  // Recover video frame after tab/app focus changes.
+  useEffect(() => {
+    const videoElement = videoRef.current;
+    if (!videoElement || !video) return;
+
+    const getTrimBounds = () => {
+      const start = video.trimStart ?? 0;
+      const rawEnd = video.trimEnd ?? videoElement.duration;
+      const end = Number.isFinite(rawEnd) ? Math.max(start, rawEnd) : start;
+      return { start, end };
+    };
+
+    const recoverFrame = () => {
+      const element = videoRef.current;
+      if (!element || document.hidden) return;
+
+      const applyRecovery = () => {
+        const { start, end } = getTrimBounds();
+        const current = element.currentTime;
+        const nextTime = Number.isFinite(current)
+          ? Math.max(start, Math.min(current, end))
+          : start;
+
+        element.currentTime = nextTime;
+        element.playbackRate = playbackRate;
+
+        if (wasPlayingBeforeHiddenRef.current) {
+          element.play().catch(() => {});
+        } else {
+          element.pause();
+        }
+      };
+
+      if (element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        applyRecovery();
+      } else {
+        const onReady = () => {
+          element.removeEventListener('loadeddata', onReady);
+          applyRecovery();
+        };
+        element.addEventListener('loadeddata', onReady, { once: true });
+        element.load();
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      const element = videoRef.current;
+      if (!element) return;
+      if (document.hidden) {
+        wasPlayingBeforeHiddenRef.current = !element.paused;
+        return;
+      }
+      recoverFrame();
+    };
+
+    const handleWindowFocus = () => recoverFrame();
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('pageshow', handleWindowFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('pageshow', handleWindowFocus);
+    };
+  }, [playbackRate, video]);
 
   // Reset local state when video changes
   useEffect(() => {
