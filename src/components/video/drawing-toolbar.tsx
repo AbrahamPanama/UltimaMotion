@@ -2,9 +2,10 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Pencil, MoveUpRight, Circle, Trash2, Undo2 } from 'lucide-react';
+import { Pencil, MoveUpRight, Circle, Trash2, Undo2, Minus, Square, Type } from 'lucide-react';
 import { useAppContext } from '@/contexts/app-context';
 import { cn } from '@/lib/utils';
+import type { DrawingType } from '@/types';
 import {
     Popover,
     PopoverContent,
@@ -57,13 +58,10 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
 
     const handleToggleAnnotate = () => {
         if (!hasActiveVideo) return;
-        if (!isDrawingEnabled) {
-            setDrawingTool('free');
-        }
         toggleDrawing();
     };
 
-    const handleSelectTool = (tool: 'arrow' | 'circle') => {
+    const handleSelectTool = (tool: DrawingType) => {
         if (!hasActiveVideo) return;
         if (!isDrawingEnabled) {
             toggleDrawing();
@@ -95,7 +93,39 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                     <span>Annotate</span>
                 </Button>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                            "h-10 rounded-md border",
+                            drawingTool === 'free'
+                                ? "border-primary/40 bg-primary/10 text-primary"
+                                : "border-border/70 text-foreground hover:bg-secondary",
+                            !canEdit && "opacity-50"
+                        )}
+                        onClick={() => handleSelectTool('free')}
+                        title="Freehand"
+                        disabled={!hasActiveVideo}
+                    >
+                        <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                            "h-10 rounded-md border",
+                            drawingTool === 'line'
+                                ? "border-primary/40 bg-primary/10 text-primary"
+                                : "border-border/70 text-foreground hover:bg-secondary",
+                            !canEdit && "opacity-50"
+                        )}
+                        onClick={() => handleSelectTool('line')}
+                        title="Line"
+                        disabled={!hasActiveVideo}
+                    >
+                        <Minus className="h-4 w-4" />
+                    </Button>
                     <Button
                         variant="ghost"
                         size="icon"
@@ -117,6 +147,38 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                         size="icon"
                         className={cn(
                             "h-10 rounded-md border",
+                            drawingTool === 'angle'
+                                ? "border-primary/40 bg-primary/10 text-primary"
+                                : "border-border/70 text-foreground hover:bg-secondary",
+                            !canEdit && "opacity-50"
+                        )}
+                        onClick={() => handleSelectTool('angle')}
+                        title="Angle"
+                        disabled={!hasActiveVideo}
+                    >
+                        <span className="text-base font-semibold leading-none">∠</span>
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                            "h-10 rounded-md border",
+                            drawingTool === 'rectangle'
+                                ? "border-primary/40 bg-primary/10 text-primary"
+                                : "border-border/70 text-foreground hover:bg-secondary",
+                            !canEdit && "opacity-50"
+                        )}
+                        onClick={() => handleSelectTool('rectangle')}
+                        title="Rectangle"
+                        disabled={!hasActiveVideo}
+                    >
+                        <Square className="h-4 w-4" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                            "h-10 rounded-md border",
                             drawingTool === 'circle'
                                 ? "border-primary/40 bg-primary/10 text-primary"
                                 : "border-border/70 text-foreground hover:bg-secondary",
@@ -127,6 +189,22 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                         disabled={!hasActiveVideo}
                     >
                         <Circle className="h-4 w-4" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                            "h-10 rounded-md border",
+                            drawingTool === 'text'
+                                ? "border-primary/40 bg-primary/10 text-primary"
+                                : "border-border/70 text-foreground hover:bg-secondary",
+                            !canEdit && "opacity-50"
+                        )}
+                        onClick={() => handleSelectTool('text')}
+                        title="Text Label"
+                        disabled={!hasActiveVideo}
+                    >
+                        <Type className="h-4 w-4" />
                     </Button>
                 </div>
             </div>

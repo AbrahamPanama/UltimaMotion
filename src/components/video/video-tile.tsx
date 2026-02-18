@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import DrawingCanvas, { Drawing } from './drawing-canvas';
+import DrawingCanvas from './drawing-canvas';
 
 interface VideoTileProps {
   video: Video | null;

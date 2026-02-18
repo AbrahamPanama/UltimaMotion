@@ -10,7 +10,7 @@ export type Video = {
   thumbnail?: string; // New: Base64 data URL for thumbnail
 };
 
-export type DrawingType = 'free' | 'arrow' | 'circle';
+export type DrawingType = 'free' | 'line' | 'arrow' | 'angle' | 'rectangle' | 'circle' | 'text';
 
 export interface Point {
     x: number;
@@ -20,9 +20,10 @@ export interface Point {
 export interface Drawing {
     id: string;
     type: DrawingType;
-    points: Point[];      // For freehand
-    start: Point;         // For arrow/circle
-    end: Point;           // For arrow/circle
+    points: Point[];      // For freehand/angle construction points
+    start: Point;         // Generic start anchor
+    end: Point;           // Generic end anchor
     color: string;
     strokeWidth: number;
+    text?: string;        // For text labels
 }
