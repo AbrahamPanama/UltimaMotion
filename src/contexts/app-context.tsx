@@ -35,6 +35,8 @@ interface AppContextType {
 
   isMuted: boolean;
   toggleMute: () => void;
+  playbackRate: number;
+  setPlaybackRate: (rate: number) => void;
 
   activeTileIndex: number | null;
   setActiveTileIndex: (index: number | null) => void;
@@ -69,6 +71,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [isLoopEnabled, setIsLoopEnabled] = useState<boolean>(true);
   const [syncOffsets, setSyncOffsets] = useState<number[]>(Array(MAX_SLOTS).fill(0));
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [activeTileIndex, setActiveTileIndex] = useState<number | null>(0);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const libraryRef = useRef<Video[]>([]);
@@ -295,6 +298,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     updateSyncOffset,
     isMuted,
     toggleMute,
+    playbackRate,
+    setPlaybackRate,
     activeTileIndex,
     setActiveTileIndex: handleSetActiveTileIndex,
     videoRefs,

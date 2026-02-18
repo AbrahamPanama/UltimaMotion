@@ -49,6 +49,27 @@ export default function PlayerControls({
   };
 
   const isOverlay = variant === 'overlay';
+  const timeTextClass = isOverlay
+    ? "text-white/90 shadow-black/50 drop-shadow-sm"
+    : "text-foreground";
+  const timeTextMutedClass = isOverlay
+    ? "text-white/70 shadow-black/50 drop-shadow-sm"
+    : "text-muted-foreground";
+  const iconButtonClass = isOverlay
+    ? "text-white/90 hover:text-white hover:bg-white/20"
+    : "text-foreground hover:text-foreground hover:bg-secondary";
+  const iconButtonPrimaryClass = isOverlay
+    ? "text-white hover:text-white hover:bg-white/20"
+    : "text-foreground hover:text-foreground hover:bg-secondary";
+  const speedTriggerClass = isOverlay
+    ? "bg-black/60 border-white/20 text-white hover:bg-black/80 hover:border-white/40"
+    : "bg-background border-border text-foreground hover:bg-secondary";
+  const speedContentClass = isOverlay
+    ? "min-w-[80px] bg-black/90 text-white border-white/20"
+    : "min-w-[80px] bg-popover text-popover-foreground border-border";
+  const speedItemClass = isOverlay
+    ? "text-xs focus:bg-white/20 focus:text-white text-white/80"
+    : "text-xs";
 
   // In sync mode, show a prominent badge/overlay
   if (isSyncEnabled) {
@@ -98,22 +119,25 @@ export default function PlayerControls({
     >
         {/* Progress Bar Row */}
         <div className="flex items-center gap-3 px-1">
-             <span className="text-xs font-mono font-medium text-white/90 w-[35px] text-right tabular-nums shadow-black/50 drop-shadow-sm">
+             <span className={cn("text-xs font-mono font-medium w-[35px] text-right tabular-nums", timeTextClass)}>
                 {formatTime(currentTime)}
              </span>
              
-             <div className="flex-1 relative group/slider py-2 cursor-pointer">
+                 <div className="flex-1 relative group/slider py-2 cursor-pointer">
                 <Slider
                     value={[currentTime]}
                     min={0}
                     max={duration || 100}
                     step={0.01}
                     onValueChange={handleSeekChange}
-                    className="cursor-pointer"
+                    className={cn(
+                      "cursor-pointer",
+                      !isOverlay && "[&>span:first-child]:bg-secondary [&>span:first-child]:border-border [&>span:first-child>span]:bg-primary"
+                    )}
                 />
              </div>
 
-             <span className="text-xs font-mono font-medium text-white/70 w-[35px] tabular-nums shadow-black/50 drop-shadow-sm">
+             <span className={cn("text-xs font-mono font-medium w-[35px] tabular-nums", timeTextMutedClass)}>
                 {formatTime(duration)}
              </span>
         </div>
@@ -126,7 +150,7 @@ export default function PlayerControls({
                 <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/20 rounded-full transition-colors"
+                    className={cn("h-8 w-8 rounded-full transition-colors", iconButtonClass)}
                     onClick={handleStepBack}
                     title="Previous Frame"
                 >
@@ -136,7 +160,7 @@ export default function PlayerControls({
                 <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-white hover:text-white hover:bg-white/20 rounded-full transition-colors"
+                    className={cn("h-8 w-8 rounded-full transition-colors", iconButtonPrimaryClass)}
                     onClick={handlePlayClick}
                     title={isPlaying ? "Pause" : "Play"}
                 >
@@ -146,7 +170,7 @@ export default function PlayerControls({
                 <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-white/90 hover:text-white hover:bg-white/20 rounded-full transition-colors"
+                    className={cn("h-8 w-8 rounded-full transition-colors", iconButtonClass)}
                     onClick={handleStepForward}
                     title="Next Frame"
                 >
@@ -162,16 +186,16 @@ export default function PlayerControls({
                     onValueChange={(val) => onRateChange(parseFloat(val))}
                   >
                     <SelectTrigger 
-                        className="h-7 w-[70px] bg-black/60 border-white/20 text-white hover:bg-black/80 hover:border-white/40 transition-colors focus:ring-0 focus:ring-offset-0"
+                        className={cn("h-7 w-[70px] transition-colors focus:ring-0 focus:ring-offset-0", speedTriggerClass)}
                     >
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent align="end" className="min-w-[80px] bg-black/90 text-white border-white/20">
+                    <SelectContent align="end" className={speedContentClass}>
                       {PLAYBACK_RATES.map((rate) => (
                         <SelectItem 
                             key={rate} 
                             value={rate.toString()} 
-                            className="text-xs focus:bg-white/20 focus:text-white text-white/80"
+                            className={speedItemClass}
                         >
                           {rate}x
                         </SelectItem>

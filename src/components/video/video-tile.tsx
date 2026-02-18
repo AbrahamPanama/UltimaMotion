@@ -31,7 +31,10 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     updateSyncOffset,
     syncOffsets,
     isMuted,
+    playbackRate,
+    setPlaybackRate,
     library,
+    slots,
     setSlot,
     zoomLevels,
     setZoomLevel,
@@ -50,7 +53,6 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1.0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
@@ -147,12 +149,12 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     };
   }, [playbackRate, video]);
 
-  // Reset local state when video changes
+  // Ensure newly mounted/changed videos inherit the current global playback rate.
   useEffect(() => {
-    if (video) {
-      setPlaybackRate(1.0);
-    }
-  }, [video]);
+    const videoElement = videoRef.current;
+    if (!videoElement || !video) return;
+    videoElement.playbackRate = playbackRate;
+  }, [video, playbackRate]);
 
   // Mute/unmute based on active state and global mute toggle
   useEffect(() => {
@@ -244,11 +246,11 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   };
 
   const handleRateChange = (rate: number) => {
-    const videoElement = videoRef.current;
-    if (videoElement) {
+    videoRefs.current.forEach((videoElement, tileIndex) => {
+      if (!videoElement || !slots[tileIndex]) return;
       videoElement.playbackRate = rate;
-      setPlaybackRate(rate);
-    }
+    });
+    setPlaybackRate(rate);
   };
 
   const handleSelectVideo = (selectedVideo: Video) => {

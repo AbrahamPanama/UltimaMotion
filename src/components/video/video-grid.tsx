@@ -14,14 +14,14 @@ export default function VideoGrid() {
         isSyncEnabled, 
         videoRefs,
         isLoopEnabled,
-        syncOffsets
+        syncOffsets,
+        playbackRate,
+        setPlaybackRate
     } = useAppContext();
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
-    const [playbackRate, setPlaybackRate] = useState(1.0);
-    
     // Use refs for animation frame loop to avoid stale closures
     const rafRef = useRef<number | null>(null);
 
@@ -151,8 +151,8 @@ export default function VideoGrid() {
     };
 
     const handleRateChange = (rate: number) => {
-        const active = getActiveVideos();
-        active.forEach(({ video }) => {
+        videoRefs.current.forEach((video, index) => {
+            if (!video || !slots[index]) return;
             video.playbackRate = rate;
         });
         setPlaybackRate(rate);
