@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import PlayerControls from './player-controls';
 import type { Video } from '@/types';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export default function VideoGrid() {
     const { 
@@ -18,6 +19,7 @@ export default function VideoGrid() {
         playbackRate,
         setPlaybackRate
     } = useAppContext();
+    const isMobile = useIsMobile();
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -158,16 +160,18 @@ export default function VideoGrid() {
         setPlaybackRate(rate);
     };
 
+    const effectiveLayout = isMobile && layout === 4 ? 2 : layout;
+
     const gridClasses = {
         1: 'grid-cols-1',
-        2: 'grid-cols-1 md:grid-cols-2',
-        4: 'grid-cols-2',
+        2: isMobile ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2',
+        4: isMobile ? 'grid-cols-1' : 'grid-cols-2',
     };
 
     return (
         <div className="flex-1 flex flex-col gap-4 overflow-hidden h-full">
-            <div className={cn('grid gap-4 flex-1 min-h-0 auto-rows-[1fr]', gridClasses[layout])}>
-                {slots.slice(0, layout).map((video, index) => (
+            <div className={cn('grid gap-4 flex-1 min-h-0 auto-rows-[1fr]', gridClasses[effectiveLayout])}>
+                {slots.slice(0, effectiveLayout).map((video, index) => (
                     <div key={index} className="min-h-0 min-w-0 overflow-hidden flex items-center justify-center">
                         <VideoTile
                             video={video}

@@ -149,7 +149,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         if (videoToRemove) URL.revokeObjectURL(videoToRemove.url);
         return prev.filter(v => v.id !== id);
       });
-      setSlots(prevSlots => prevSlots.map(slot => (slot?.id === id ? null : slot)));
+      setSlots(prevSlots => {
+        const newSlots = prevSlots.map(slot => (slot?.id === id ? null : slot));
+        const filledCount = newSlots.filter((slot) => slot !== null).length;
+        let requiredLayout: Layout = 1;
+        if (filledCount > 2) requiredLayout = 4;
+        else if (filledCount > 1) requiredLayout = 2;
+        setLayout(requiredLayout);
+        setActiveTileIndex(prev => (prev === null || prev >= requiredLayout ? 0 : prev));
+        return newSlots;
+      });
       toast({ title: "Video Removed" });
     } catch (error) {
       console.error('Failed to remove video:', error);
@@ -163,27 +172,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       if (index >= 0 && index < MAX_SLOTS) {
         newSlots[index] = video;
       }
-
-      // Auto-expand layout logic
-      if (video !== null) {
-        // Count how many slots will be filled after this update
-        const filledCount = newSlots.filter(s => s !== null).length;
-
-        // If we are adding a video, ensure layout is big enough
-        // Current layout vs needed layout
-        // 1 video -> layout 1
-        // 2 videos -> layout 2
-        // 3-4 videos -> layout 4
-
-        let requiredLayout: Layout = 1;
-        if (filledCount > 2) requiredLayout = 4;
-        else if (filledCount > 1) requiredLayout = 2;
-
-        // Only expand, don't shrink automatically
-        if (requiredLayout > layout) {
-          setLayout(requiredLayout);
-        }
-      }
+      const filledCount = newSlots.filter((slot) => slot !== null).length;
+      let requiredLayout: Layout = 1;
+      if (filledCount > 2) requiredLayout = 4;
+      else if (filledCount > 1) requiredLayout = 2;
+      setLayout(requiredLayout);
+      setActiveTileIndex(prev => (prev === null || prev >= requiredLayout ? 0 : prev));
       return newSlots;
     });
 

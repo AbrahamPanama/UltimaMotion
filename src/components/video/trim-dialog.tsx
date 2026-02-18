@@ -361,7 +361,7 @@ export function TrimDialog({ open, onOpenChange, blob, initialName, onSave }: Tr
           </div>
           <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-6 mt-1 bg-card/95 backdrop-blur-sm border-t border-border/40 px-3 sm:px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:pb-3">
             <div className="flex gap-2">
-              <Button variant="ghost" className="flex-1" onClick={() => onOpenChange(false)}>Discard</Button>
+              <Button variant="ghost" className="flex-1" onClick={() => onOpenChange(false)}>Close</Button>
               <Button onClick={handleSave} className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/20">
                 Save to Library
               </Button>

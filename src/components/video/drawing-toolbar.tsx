@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Pencil, MoveUpRight, Circle, Trash2, X, Palette } from 'lucide-react';
+import { Pencil, MoveUpRight, Circle, Trash2, Undo2 } from 'lucide-react';
 import { useAppContext } from '@/contexts/app-context';
 import { cn } from '@/lib/utils';
 import {
@@ -20,7 +20,11 @@ const COLORS = [
     { name: 'Black', value: '#000000' },
 ];
 
-export default function DrawingToolbar() {
+interface DrawingToolbarProps {
+    className?: string;
+}
+
+export default function DrawingToolbar({ className }: DrawingToolbarProps) {
     const {
         isDrawingEnabled,
         toggleDrawing,
@@ -28,16 +32,17 @@ export default function DrawingToolbar() {
         setDrawingTool,
         drawingColor,
         setDrawingColor,
+        drawings,
+        setDrawingsForVideo,
         activeTileIndex,
         slots,
         clearDrawings
     } = useAppContext();
 
     const activeVideo = activeTileIndex !== null ? slots[activeTileIndex] : null;
-
-    if (!activeVideo && isDrawingEnabled) {
-        // Should probably disable drawing if no video is active, or show disabled state
-    }
+    const currentDrawings = activeVideo ? (drawings[activeVideo.id] || []) : [];
+    const hasActiveVideo = !!activeVideo;
+    const canEdit = isDrawingEnabled && hasActiveVideo;
 
     const handleClear = () => {
         if (activeVideo) {
@@ -45,100 +50,140 @@ export default function DrawingToolbar() {
         }
     };
 
+    const handleUndo = () => {
+        if (!activeVideo || currentDrawings.length === 0) return;
+        setDrawingsForVideo(activeVideo.id, currentDrawings.slice(0, -1));
+    };
+
+    const handleToggleAnnotate = () => {
+        if (!hasActiveVideo) return;
+        if (!isDrawingEnabled) {
+            setDrawingTool('free');
+        }
+        toggleDrawing();
+    };
+
+    const handleSelectTool = (tool: 'arrow' | 'circle') => {
+        if (!hasActiveVideo) return;
+        if (!isDrawingEnabled) {
+            toggleDrawing();
+        }
+        setDrawingTool(tool);
+    };
+
     return (
-        <div className="flex items-center gap-2 p-1 bg-background/80 backdrop-blur-sm border rounded-lg shadow-sm">
-            <Button
-                variant={isDrawingEnabled ? "default" : "ghost"}
-                size="sm"
-                onClick={toggleDrawing}
-                title={isDrawingEnabled ? "Exit Drawing Mode" : "Enter Drawing Mode"}
-                className={cn("gap-2", isDrawingEnabled && "bg-primary text-primary-foreground")}
-            >
-                <Pencil className="h-4 w-4" />
-                <span className="sr-only sm:not-sr-only sm:inline-block">Draw</span>
-            </Button>
+        <div className={cn(
+            "grid h-full grid-cols-1 grid-rows-2 gap-2 rounded-lg border border-border/70 bg-background p-2.5",
+            className
+        )}>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(132px,auto),1fr]">
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleToggleAnnotate}
+                    title={isDrawingEnabled ? "Exit annotate mode" : "Enter annotate mode"}
+                    className={cn(
+                        "h-10 justify-center gap-2 rounded-md border text-sm font-medium",
+                        isDrawingEnabled
+                            ? "bg-primary text-primary-foreground border-primary hover:bg-primary/90"
+                            : "bg-background text-foreground border-border hover:bg-secondary",
+                        !hasActiveVideo && "opacity-50"
+                    )}
+                    disabled={!hasActiveVideo}
+                >
+                    <Pencil className="h-4 w-4" />
+                    <span>Annotate</span>
+                </Button>
 
-            {isDrawingEnabled && (
-                <>
-                    <div className="w-px h-6 bg-border mx-1" />
-                    
-                    {/* Tools */}
-                    <div className="flex items-center gap-1">
-                        <Button
-                            variant={drawingTool === 'free' ? "secondary" : "ghost"}
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => setDrawingTool('free')}
-                            title="Freehand"
-                        >
-                            <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                            variant={drawingTool === 'arrow' ? "secondary" : "ghost"}
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => setDrawingTool('arrow')}
-                            title="Arrow"
-                        >
-                            <MoveUpRight className="h-4 w-4" />
-                        </Button>
-                        <Button
-                            variant={drawingTool === 'circle' ? "secondary" : "ghost"}
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => setDrawingTool('circle')}
-                            title="Circle"
-                        >
-                            <Circle className="h-4 w-4" />
-                        </Button>
-                    </div>
-
-                    <div className="w-px h-6 bg-border mx-1" />
-
-                    {/* Color Picker */}
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="h-8 w-8 p-1"
-                                style={{ color: drawingColor }}
-                            >
-                                <div className="w-5 h-5 rounded-full border border-white/20 shadow-sm" style={{ backgroundColor: drawingColor }} />
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-2" align="center">
-                            <div className="flex gap-2">
-                                {COLORS.map((c) => (
-                                    <button
-                                        key={c.value}
-                                        className={cn(
-                                            "w-6 h-6 rounded-full border border-border shadow-sm hover:scale-110 transition-transform focus:outline-none focus:ring-2 ring-offset-1 ring-primary",
-                                            drawingColor === c.value && "ring-2"
-                                        )}
-                                        style={{ backgroundColor: c.value }}
-                                        onClick={() => setDrawingColor(c.value)}
-                                        title={c.name}
-                                    />
-                                ))}
-                            </div>
-                        </PopoverContent>
-                    </Popover>
-
-                    <div className="w-px h-6 bg-border mx-1" />
-
-                    {/* Actions */}
+                <div className="grid grid-cols-2 gap-2">
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                        onClick={handleClear}
-                        title="Clear All Drawings"
+                        className={cn(
+                            "h-10 rounded-md border",
+                            drawingTool === 'arrow'
+                                ? "border-primary/40 bg-primary/10 text-primary"
+                                : "border-border/70 text-foreground hover:bg-secondary",
+                            !canEdit && "opacity-50"
+                        )}
+                        onClick={() => handleSelectTool('arrow')}
+                        title="Arrow"
+                        disabled={!hasActiveVideo}
                     >
-                        <Trash2 className="h-4 w-4" />
+                        <MoveUpRight className="h-4 w-4" />
                     </Button>
-                </>
-            )}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                            "h-10 rounded-md border",
+                            drawingTool === 'circle'
+                                ? "border-primary/40 bg-primary/10 text-primary"
+                                : "border-border/70 text-foreground hover:bg-secondary",
+                            !canEdit && "opacity-50"
+                        )}
+                        onClick={() => handleSelectTool('circle')}
+                        title="Circle"
+                        disabled={!hasActiveVideo}
+                    >
+                        <Circle className="h-4 w-4" />
+                    </Button>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            className={cn("h-10 justify-start gap-2 rounded-md border border-border/70 text-foreground hover:bg-secondary", !canEdit && "opacity-50")}
+                            disabled={!hasActiveVideo}
+                            title="Drawing color"
+                        >
+                            <div className="h-5 w-5 rounded-full border border-white/20 shadow-sm" style={{ backgroundColor: drawingColor }} />
+                            <span className="text-sm font-medium">Color</span>
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-2" align="start">
+                        <div className="flex gap-2">
+                            {COLORS.map((c) => (
+                                <button
+                                    key={c.value}
+                                    className={cn(
+                                        "w-6 h-6 rounded-full border border-border shadow-sm hover:scale-110 transition-transform focus:outline-none focus:ring-2 ring-offset-1 ring-primary",
+                                        drawingColor === c.value && "ring-2"
+                                    )}
+                                    style={{ backgroundColor: c.value }}
+                                    onClick={() => setDrawingColor(c.value)}
+                                    title={c.name}
+                                />
+                            ))}
+                        </div>
+                    </PopoverContent>
+                </Popover>
+
+                <Button
+                    variant="ghost"
+                    className="h-10 justify-center gap-2 rounded-md border border-border/70 text-foreground hover:bg-secondary disabled:opacity-50"
+                    onClick={handleUndo}
+                    disabled={!canEdit || currentDrawings.length === 0}
+                    title="Undo last drawing"
+                >
+                    <Undo2 className="h-4 w-4" />
+                    <span className="text-sm font-medium">Undo</span>
+                </Button>
+
+                <Button
+                    variant="ghost"
+                    className="h-10 justify-center gap-2 rounded-md border border-destructive/35 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                    onClick={handleClear}
+                    disabled={!canEdit || currentDrawings.length === 0}
+                    title="Clear all drawings"
+                >
+                    <Trash2 className="h-4 w-4" />
+                    <span className="text-sm font-medium">Clear</span>
+                </Button>
+            </div>
         </div>
     );
 }

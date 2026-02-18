@@ -1,15 +1,12 @@
 'use client';
 import { useAppContext } from '@/contexts/app-context';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import { LayoutGrid, Square, Rows, Smartphone, Repeat, Radio, Volume2, VolumeX } from 'lucide-react';
+import { Smartphone, Repeat, Radio, Volume2, VolumeX } from 'lucide-react';
 import DrawingToolbar from './drawing-toolbar';
+import { cn } from '@/lib/utils';
 
 export default function MainControls() {
   const { 
-    setLayout, 
-    layout,
     isSyncEnabled, 
     toggleSync, 
     isPortraitMode, 
@@ -20,123 +17,94 @@ export default function MainControls() {
     toggleMute 
   } = useAppContext();
 
+  const toggleButtonClasses = (active: boolean, tone: 'primary' | 'destructive' = 'primary') =>
+    cn(
+      'h-10 w-full justify-start px-3 gap-2 rounded-md border text-sm font-medium transition-colors',
+      active
+        ? tone === 'destructive'
+          ? 'bg-destructive/10 text-destructive border-destructive/35 hover:bg-destructive/15'
+          : 'bg-primary/10 text-primary border-primary/35 hover:bg-primary/15'
+        : 'bg-background text-foreground border-border hover:bg-secondary'
+    );
+
+  const statePillClasses = (active: boolean, tone: 'primary' | 'destructive' = 'primary') =>
+    cn(
+      'ml-auto inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-none',
+      active
+        ? tone === 'destructive'
+          ? 'border-destructive/35 bg-destructive/10 text-destructive'
+          : 'border-primary/35 bg-primary/10 text-primary'
+        : 'border-border bg-secondary/50 text-muted-foreground'
+    );
+
   return (
-    <div className="w-full max-w-4xl mx-auto p-4 bg-card/80 backdrop-blur-md border border-border/50 rounded-xl shadow-sm space-y-4">
-      
-      {/* Top Row: Layout & Global Toggles */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-        
-        {/* Layout Selectors */}
-        <div className="flex items-center gap-2 bg-secondary/30 p-1 rounded-lg">
-          <Button
-            variant={layout === 1 ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setLayout(1)}
-            className="w-10 h-8"
-            title="Single View"
-          >
-            <Square className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={layout === 2 ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setLayout(2)}
-            className="w-10 h-8"
-            title="Split View"
-          >
-            <Rows className="h-4 w-4 rotate-90 sm:rotate-0" />
-          </Button>
-          <Button
-            variant={layout === 4 ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setLayout(4)}
-            className="w-10 h-8"
-            title="Grid View"
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </Button>
-        </div>
+    <div className="w-full max-w-6xl mx-auto rounded-xl border border-border/70 bg-card/95 shadow-sm px-4 py-3 sm:px-5 sm:py-4">
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
+        <section className="flex flex-col gap-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Playback & Analysis</p>
+          <div className="flex-1 rounded-lg border border-border/70 bg-secondary/20 p-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleMute}
+                className={toggleButtonClasses(isMuted, 'destructive')}
+                aria-pressed={isMuted}
+                title={isMuted ? 'Unmute audio' : 'Mute audio'}
+              >
+                {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                <span>Mute</span>
+                <span className={statePillClasses(isMuted, 'destructive')}>{isMuted ? 'On' : 'Off'}</span>
+              </Button>
 
-        <div className="h-6 w-px bg-border hidden sm:block" />
-
-        {/* Global Controls */}
-        <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
-          
-          {/* Mute Toggle */}
-           <Button
-            variant="ghost"
-            size="sm"
-            onClick={toggleMute}
-            className={`gap-2 ${isMuted ? 'text-destructive hover:text-destructive/90' : 'text-foreground'}`}
-            title={isMuted ? 'Unmute all' : 'Mute all'}
-          >
-            {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-            <span className="hidden sm:inline text-sm font-medium">{isMuted ? 'Muted' : 'Sound'}</span>
-          </Button>
-
-           {/* Loop Toggle */}
-          <div className="flex items-center gap-2">
-             <Button
+              <Button
                 variant="ghost"
                 size="sm"
                 onClick={toggleLoop}
-                className={`gap-2 ${isLoopEnabled ? 'text-primary' : 'text-muted-foreground'}`}
-             >
+                className={toggleButtonClasses(isLoopEnabled)}
+                aria-pressed={isLoopEnabled}
+                title="Loop playback"
+              >
                 <Repeat className="h-4 w-4" />
-                <span className="text-sm font-medium">Loop</span>
-             </Button>
-             <Switch
-                id="loop-mode"
-                checked={isLoopEnabled}
-                onCheckedChange={toggleLoop}
-                className="scale-75"
-             />
-          </div>
+                <span>Loop</span>
+                <span className={statePillClasses(isLoopEnabled)}>{isLoopEnabled ? 'On' : 'Off'}</span>
+              </Button>
 
-          {/* Portrait Toggle */}
-          <div className="flex items-center gap-2">
-             <Button
+              <Button
                 variant="ghost"
                 size="sm"
                 onClick={togglePortraitMode}
-                className={`gap-2 ${isPortraitMode ? 'text-primary' : 'text-muted-foreground'}`}
-             >
+                className={toggleButtonClasses(isPortraitMode)}
+                aria-pressed={isPortraitMode}
+                title="Portrait framing"
+              >
                 <Smartphone className="h-4 w-4" />
-                <span className="text-sm font-medium">Portrait</span>
-             </Button>
-             <Switch
-                id="portrait-mode"
-                checked={isPortraitMode}
-                onCheckedChange={togglePortraitMode}
-                 className="scale-75"
-             />
-          </div>
+                <span>Portrait</span>
+                <span className={statePillClasses(isPortraitMode)}>{isPortraitMode ? 'On' : 'Off'}</span>
+              </Button>
 
-          {/* Sync Toggle */}
-          <div className="flex items-center gap-2 pl-2 border-l border-border/50">
-             <Button
+              <Button
                 variant="ghost"
                 size="sm"
                 onClick={toggleSync}
-                className={`gap-2 ${isSyncEnabled ? 'text-primary' : 'text-muted-foreground'}`}
-             >
-                <Radio className={`h-4 w-4 ${isSyncEnabled ? 'animate-pulse' : ''}`} />
-                <span className="text-sm font-medium">Sync</span>
-             </Button>
-             <Switch
-                id="sync-mode"
-                checked={isSyncEnabled}
-                onCheckedChange={toggleSync}
-                 className="scale-75"
-             />
+                className={toggleButtonClasses(isSyncEnabled)}
+                aria-pressed={isSyncEnabled}
+                title="Sync all active videos"
+              >
+                <Radio className={cn('h-4 w-4', isSyncEnabled && 'animate-pulse')} />
+                <span>Sync</span>
+                <span className={statePillClasses(isSyncEnabled)}>{isSyncEnabled ? 'On' : 'Off'}</span>
+              </Button>
+            </div>
           </div>
+        </section>
 
-          {/* Drawing Toolbar */}
-          <div className="flex items-center gap-2 pl-2 border-l border-border/50">
-             <DrawingToolbar />
+        <section className="flex flex-col gap-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Annotate</p>
+          <div className="flex-1 rounded-lg border border-border/70 bg-secondary/20 p-3">
+            <DrawingToolbar className="h-full w-full border-0 bg-transparent p-0 shadow-none" />
           </div>
-
-        </div>
+        </section>
       </div>
     </div>
   );
