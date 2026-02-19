@@ -217,14 +217,14 @@ export default function PoseOverlay({
     previousMediaTimeRef.current = mediaTimeMs;
   }, [mediaTimeMs]);
 
-  if (!enabled) return null;
-
   const sourceWidth = videoElement?.videoWidth || 1;
   const sourceHeight = videoElement?.videoHeight || 1;
   const projectedBoxes = useMemo<Array<PoseBox | null>>(
     () => projectedPoses.map((pose) => getPoseBox(pose, sourceWidth, sourceHeight)),
     [projectedPoses, sourceWidth, sourceHeight]
   );
+
+  if (!enabled) return null;
 
   const selectedPoseIndex = (() => {
     if (projectedPoses.length === 0) return -1;
@@ -452,7 +452,7 @@ export default function PoseOverlay({
         ) : (
           <div className="flex items-center gap-2">
             <span>
-              {`Pose ${status === 'loading' ? 'loading' : 'live'} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount} · ${isLocked ? 'locked' : 'auto'}`}
+              {`Pose ${status === 'loading' ? 'loading' : 'live'} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount} · ${isLocked ? 'locked' : 'auto'}${isSelectingTarget ? ' (tap box)' : ''}`}
             </span>
             {projectedPoses.length > 1 && !isLocked && (
               <button
