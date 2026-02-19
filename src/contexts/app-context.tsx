@@ -70,6 +70,8 @@ interface AppContextType {
   setPoseMinVisibility: (value: number) => void;
   poseStability: number;
   setPoseStability: (value: number) => void;
+  poseUseOneEuroFilter: boolean;
+  setPoseUseOneEuroFilter: (value: boolean) => void;
   poseTargetFps: number;
   setPoseTargetFps: (value: number) => void;
   poseMinPoseDetectionConfidence: number;
@@ -78,6 +80,12 @@ interface AppContextType {
   setPoseMinPosePresenceConfidence: (value: number) => void;
   poseMinTrackingConfidence: number;
   setPoseMinTrackingConfidence: (value: number) => void;
+  poseUseExactFrameSync: boolean;
+  setPoseUseExactFrameSync: (value: boolean) => void;
+  poseUseIsolatedJointRejection: boolean;
+  setPoseUseIsolatedJointRejection: (value: boolean) => void;
+  poseUseLagExtrapolation: boolean;
+  setPoseUseLagExtrapolation: (value: boolean) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -110,14 +118,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // Pose overlay state
   const [isPoseEnabled, setIsPoseEnabled] = useState<boolean>(false);
-  const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('full');
+  const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('yolo26-small'); // Default to YOLO26 Small for best acro tracking
   const [poseAnalyzeScope, setPoseAnalyzeScope] = useState<PoseAnalyzeScope>('active-tile');
   const [poseMinVisibility, setPoseMinVisibility] = useState<number>(0.25);
-  const [poseStability, setPoseStability] = useState<number>(0.65);
-  const [poseTargetFps, setPoseTargetFps] = useState<number>(15);
-  const [poseMinPoseDetectionConfidence, setPoseMinPoseDetectionConfidence] = useState<number>(0.35);
-  const [poseMinPosePresenceConfidence, setPoseMinPosePresenceConfidence] = useState<number>(0.35);
-  const [poseMinTrackingConfidence, setPoseMinTrackingConfidence] = useState<number>(0.35);
+  const [poseStability, setPoseStability] = useState<number>(0.85); // Increased default stability for less jitter out-of-the-box
+  const [poseUseOneEuroFilter, setPoseUseOneEuroFilter] = useState<boolean>(true);
+  const [poseTargetFps, setPoseTargetFps] = useState<number>(30); // Raised to 30fps to better match video playback rates
+  const [poseMinPoseDetectionConfidence, setPoseMinPoseDetectionConfidence] = useState<number>(0.55); // Increased to ignore faint phantom limbs
+  const [poseMinPosePresenceConfidence, setPoseMinPosePresenceConfidence] = useState<number>(0.65); // Increased to drop low-confidence occluded jumps
+  const [poseMinTrackingConfidence, setPoseMinTrackingConfidence] = useState<number>(0.65); // Increased for stable skeleton persistence
+  const [poseUseExactFrameSync, setPoseUseExactFrameSync] = useState<boolean>(true);
+  const [poseUseIsolatedJointRejection, setPoseUseIsolatedJointRejection] = useState<boolean>(true);
+  const [poseUseLagExtrapolation, setPoseUseLagExtrapolation] = useState<boolean>(true);
 
   const loadLibrary = useCallback(async () => {
     try {
@@ -383,6 +395,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseMinVisibility: handleSetPoseMinVisibility,
     poseStability,
     setPoseStability: handleSetPoseStability,
+    poseUseOneEuroFilter,
+    setPoseUseOneEuroFilter,
     poseTargetFps,
     setPoseTargetFps: handleSetPoseTargetFps,
     poseMinPoseDetectionConfidence,
@@ -390,7 +404,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     poseMinPosePresenceConfidence,
     setPoseMinPosePresenceConfidence: handleSetPoseMinPosePresenceConfidence,
     poseMinTrackingConfidence,
-    setPoseMinTrackingConfidence: handleSetPoseMinTrackingConfidence
+    setPoseMinTrackingConfidence: handleSetPoseMinTrackingConfidence,
+    poseUseExactFrameSync,
+    setPoseUseExactFrameSync,
+    poseUseIsolatedJointRejection,
+    setPoseUseIsolatedJointRejection,
+    poseUseLagExtrapolation,
+    setPoseUseLagExtrapolation
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

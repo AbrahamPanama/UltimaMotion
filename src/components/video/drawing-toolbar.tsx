@@ -19,6 +19,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 
 const COLORS = [
     { name: 'Red', value: '#ef4444' },
@@ -57,6 +58,14 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         setPoseMinVisibility,
         poseStability,
         setPoseStability,
+        poseUseOneEuroFilter,
+        setPoseUseOneEuroFilter,
+        poseUseExactFrameSync,
+        setPoseUseExactFrameSync,
+        poseUseIsolatedJointRejection,
+        setPoseUseIsolatedJointRejection,
+        poseUseLagExtrapolation,
+        setPoseUseLagExtrapolation,
         poseTargetFps,
         setPoseTargetFps,
         poseMinPoseDetectionConfidence,
@@ -102,6 +111,8 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         if (!canPose) return;
         togglePose();
     };
+
+    const isYoloModel = poseModelVariant.startsWith('yolo');
 
     return (
         <div className={cn(
@@ -319,6 +330,58 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                     !canPose && "opacity-60"
                 )}>
                     <div className="grid gap-3 md:grid-cols-2">
+                        {!isYoloModel && (
+                            <>
+                                <div className="flex items-center justify-between rounded-md border border-border/60 bg-background/60 px-3 py-2 md:col-span-2">
+                                    <div className="space-y-0.5">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">One Euro Filter</p>
+                                        <p className="text-[11px] text-muted-foreground/80">Confidence-aware anti-jitter smoothing</p>
+                                    </div>
+                                    <Switch
+                                        checked={poseUseOneEuroFilter}
+                                        onCheckedChange={setPoseUseOneEuroFilter}
+                                        aria-label="Toggle One Euro pose filter"
+                                    />
+                                </div>
+
+                                <div className="flex items-center justify-between rounded-md border border-border/60 bg-background/60 px-3 py-2 md:col-span-2">
+                                    <div className="space-y-0.5">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Exact Frame Sync</p>
+                                        <p className="text-[11px] text-muted-foreground/80">Prevents duplicate frames using native metadata</p>
+                                    </div>
+                                    <Switch
+                                        checked={poseUseExactFrameSync}
+                                        onCheckedChange={setPoseUseExactFrameSync}
+                                        aria-label="Toggle exact frame sync"
+                                    />
+                                </div>
+
+                                <div className="flex items-center justify-between rounded-md border border-border/60 bg-background/60 px-3 py-2 md:col-span-2">
+                                    <div className="space-y-0.5">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Isolated Joint Rejection</p>
+                                        <p className="text-[11px] text-muted-foreground/80">Prevents single-joint glitch from resetting full body</p>
+                                    </div>
+                                    <Switch
+                                        checked={poseUseIsolatedJointRejection}
+                                        onCheckedChange={setPoseUseIsolatedJointRejection}
+                                        aria-label="Toggle isolated joint rejection"
+                                    />
+                                </div>
+
+                                <div className="flex items-center justify-between rounded-md border border-border/60 bg-background/60 px-3 py-2 md:col-span-2">
+                                    <div className="space-y-0.5">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Lag Extrapolation</p>
+                                        <p className="text-[11px] text-muted-foreground/80">Predicts forward motion to hide compute delay</p>
+                                    </div>
+                                    <Switch
+                                        checked={poseUseLagExtrapolation}
+                                        onCheckedChange={setPoseUseLagExtrapolation}
+                                        aria-label="Toggle predictive lag extrapolation"
+                                    />
+                                </div>
+                            </>
+                        )}
+
                         <div className="space-y-2">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Model</p>
                             <Select
@@ -329,9 +392,11 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="lite">Lite (faster)</SelectItem>
-                                    <SelectItem value="full">Full (balanced)</SelectItem>
-                                    <SelectItem value="heavy">Heavy (most accurate)</SelectItem>
+                                    <SelectItem value="yolo26-nano">YOLO26 Nano (Fastest)</SelectItem>
+                                    <SelectItem value="yolo26-small">YOLO26 Small (Best for Acro)</SelectItem>
+                                    <SelectItem value="lite">MediaPipe Lite (Legacy)</SelectItem>
+                                    <SelectItem value="full">MediaPipe Full (Legacy)</SelectItem>
+                                    <SelectItem value="heavy">MediaPipe Heavy (Legacy)</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -366,75 +431,79 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                             />
                         </div>
 
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                <span>Min Visibility</span>
-                                <span>{poseMinVisibility.toFixed(2)}</span>
-                            </div>
-                            <Slider
-                                value={[poseMinVisibility]}
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                onValueChange={(value) => setPoseMinVisibility(value[0])}
-                            />
-                        </div>
+                        {!isYoloModel && (
+                            <>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                        <span>Min Visibility</span>
+                                        <span>{poseMinVisibility.toFixed(2)}</span>
+                                    </div>
+                                    <Slider
+                                        value={[poseMinVisibility]}
+                                        min={0}
+                                        max={1}
+                                        step={0.05}
+                                        onValueChange={(value) => setPoseMinVisibility(value[0])}
+                                    />
+                                </div>
 
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                <span>Stability</span>
-                                <span>{poseStability.toFixed(2)}</span>
-                            </div>
-                            <Slider
-                                value={[poseStability]}
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                onValueChange={(value) => setPoseStability(value[0])}
-                            />
-                        </div>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                        <span>Stability</span>
+                                        <span>{poseStability.toFixed(2)}</span>
+                                    </div>
+                                    <Slider
+                                        value={[poseStability]}
+                                        min={0}
+                                        max={1}
+                                        step={0.05}
+                                        onValueChange={(value) => setPoseStability(value[0])}
+                                    />
+                                </div>
 
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                <span>Detection Conf.</span>
-                                <span>{poseMinPoseDetectionConfidence.toFixed(2)}</span>
-                            </div>
-                            <Slider
-                                value={[poseMinPoseDetectionConfidence]}
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                onValueChange={(value) => setPoseMinPoseDetectionConfidence(value[0])}
-                            />
-                        </div>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                        <span>Detection Conf.</span>
+                                        <span>{poseMinPoseDetectionConfidence.toFixed(2)}</span>
+                                    </div>
+                                    <Slider
+                                        value={[poseMinPoseDetectionConfidence]}
+                                        min={0}
+                                        max={1}
+                                        step={0.05}
+                                        onValueChange={(value) => setPoseMinPoseDetectionConfidence(value[0])}
+                                    />
+                                </div>
 
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                <span>Presence Conf.</span>
-                                <span>{poseMinPosePresenceConfidence.toFixed(2)}</span>
-                            </div>
-                            <Slider
-                                value={[poseMinPosePresenceConfidence]}
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                onValueChange={(value) => setPoseMinPosePresenceConfidence(value[0])}
-                            />
-                        </div>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                        <span>Presence Conf.</span>
+                                        <span>{poseMinPosePresenceConfidence.toFixed(2)}</span>
+                                    </div>
+                                    <Slider
+                                        value={[poseMinPosePresenceConfidence]}
+                                        min={0}
+                                        max={1}
+                                        step={0.05}
+                                        onValueChange={(value) => setPoseMinPosePresenceConfidence(value[0])}
+                                    />
+                                </div>
 
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                <span>Tracking Conf.</span>
-                                <span>{poseMinTrackingConfidence.toFixed(2)}</span>
-                            </div>
-                            <Slider
-                                value={[poseMinTrackingConfidence]}
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                onValueChange={(value) => setPoseMinTrackingConfidence(value[0])}
-                            />
-                        </div>
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                        <span>Tracking Conf.</span>
+                                        <span>{poseMinTrackingConfidence.toFixed(2)}</span>
+                                    </div>
+                                    <Slider
+                                        value={[poseMinTrackingConfidence]}
+                                        min={0}
+                                        max={1}
+                                        step={0.05}
+                                        onValueChange={(value) => setPoseMinTrackingConfidence(value[0])}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

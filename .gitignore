@@ -44,3 +44,17 @@ next-env.d.ts
 firebase-debug.log
 firestore-debug.log
 .firebase/
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+yolo_env/
+venv/
+.venv/
+env/
+
+# machine learning weights and models
+*.pt
+*.pth
+*.onnx

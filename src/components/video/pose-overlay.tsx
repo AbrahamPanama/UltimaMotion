@@ -5,6 +5,12 @@ import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 import type { PoseModelVariant } from '@/types';
 import { cn } from '@/lib/utils';
 import { usePoseLandmarks } from '@/hooks/use-pose-landmarks';
+import {
+  createOneEuroScalarState,
+  updateOneEuroScalar,
+  type OneEuroFilterParams,
+  type OneEuroScalarState,
+} from '@/lib/pose/one-euro-filter';
 
 const POSE_CONNECTIONS: Array<[number, number]> = [
   [0, 1], [1, 2], [2, 3], [3, 7],
@@ -27,8 +33,12 @@ interface PoseOverlayProps {
   objectFit: 'contain' | 'cover';
   modelVariant: PoseModelVariant;
   targetFps: number;
+  useExactFrameSync: boolean;
   minVisibility: number;
   stability: number;
+  useOneEuroFilter: boolean;
+  useIsolatedJointRejection: boolean;
+  useLagExtrapolation: boolean;
   minPoseDetectionConfidence: number;
   minPosePresenceConfidence: number;
   minTrackingConfidence: number;
@@ -49,8 +59,16 @@ interface PoseBox {
   center: { x: number; y: number };
 }
 
+interface OneEuroLandmarkState {
+  xFilter: OneEuroScalarState;
+  yFilter: OneEuroScalarState;
+  visibility: number;
+  holdFrames: number;
+}
+
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const lerp = (from: number, to: number, alpha: number) => from + ((to - from) * alpha);
 const SMOOTHING_BASE_ALPHA = 0.24;
 const SMOOTHING_MAX_ALPHA = 0.82;
 const SMOOTHING_MIN_ALPHA = 0.06;
@@ -59,6 +77,15 @@ const SMOOTHING_RESET_DISTANCE_MIN_RATIO = 0.16;
 const SMOOTHING_RESET_DISTANCE_MAX_RATIO = 0.28;
 const SMOOTHING_MIN_DT_MS = 8;
 const SMOOTHING_MAX_DT_MS = 120;
+const ONE_EURO_MIN_CUTOFF_FAST = 3.2;
+const ONE_EURO_MIN_CUTOFF_STABLE = 0.05; // Dropped from 0.55 for aggressive smoothing at low speeds
+const ONE_EURO_BETA_FAST = 0.85;
+const ONE_EURO_BETA_STABLE = 0.3; // Increased to 0.3 to reduce lag during sudden movements
+const ONE_EURO_DERIVATIVE_CUTOFF_FAST = 2.4;
+const ONE_EURO_DERIVATIVE_CUTOFF_STABLE = 1.2;
+const ONE_EURO_LOW_CONFIDENCE_BASE = 0.14;
+const ONE_EURO_HOLD_FRAMES_MIN = 1;
+const ONE_EURO_HOLD_FRAMES_MAX = 8;
 
 const normalizeLandmarks = (
   landmarks: NormalizedLandmark[],
@@ -227,6 +254,123 @@ const smoothSelectedPose = (
   });
 };
 
+const getOneEuroParams = (stability: number): OneEuroFilterParams => {
+  const normalizedStability = clamp01(stability);
+  return {
+    minCutoff: lerp(ONE_EURO_MIN_CUTOFF_FAST, ONE_EURO_MIN_CUTOFF_STABLE, normalizedStability),
+    beta: lerp(ONE_EURO_BETA_FAST, ONE_EURO_BETA_STABLE, normalizedStability),
+    derivativeCutoff: lerp(
+      ONE_EURO_DERIVATIVE_CUTOFF_FAST,
+      ONE_EURO_DERIVATIVE_CUTOFF_STABLE,
+      normalizedStability
+    ),
+  };
+};
+
+const smoothSelectedPoseWithOneEuro = (
+  nextPose: ProjectedPoint[],
+  previousPose: ProjectedPoint[] | null,
+  previousState: OneEuroLandmarkState[] | null,
+  dtMs: number,
+  sourceWidth: number,
+  sourceHeight: number,
+  stability: number,
+  minVisibility: number,
+  useIsolatedJointRejection: boolean,
+  lagMs: number
+) => {
+  if (!previousPose || previousPose.length !== nextPose.length) {
+    return { pose: nextPose, state: null as OneEuroLandmarkState[] | null };
+  }
+
+  const normalizedStability = clamp01(stability);
+  const sourceDiagonal = Math.hypot(sourceWidth, sourceHeight);
+  const resetDistanceRatio = SMOOTHING_RESET_DISTANCE_MAX_RATIO
+    - ((SMOOTHING_RESET_DISTANCE_MAX_RATIO - SMOOTHING_RESET_DISTANCE_MIN_RATIO) * normalizedStability);
+  const resetDistance = sourceDiagonal * resetDistanceRatio;
+
+  const hasLargeJump = !useIsolatedJointRejection && nextPose.some((point, index) => {
+    const previousPoint = previousPose[index];
+    if (!previousPoint) return true;
+    return Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y) > resetDistance;
+  });
+
+  if (hasLargeJump) {
+    return { pose: nextPose, state: null as OneEuroLandmarkState[] | null };
+  }
+
+  const params = getOneEuroParams(normalizedStability);
+  const holdThreshold = Math.max(ONE_EURO_LOW_CONFIDENCE_BASE, minVisibility * 0.7);
+  const maxHoldFrames = Math.round(lerp(ONE_EURO_HOLD_FRAMES_MIN, ONE_EURO_HOLD_FRAMES_MAX, normalizedStability));
+  const nextState = previousState && previousState.length === nextPose.length
+    ? previousState
+    : nextPose.map((point) => ({
+      xFilter: createOneEuroScalarState(),
+      yFilter: createOneEuroScalarState(),
+      visibility: point.visibility,
+      holdFrames: 0,
+    }));
+
+  const smoothedPose = nextPose.map((point, index) => {
+    const landmarkState = nextState[index];
+    const previousPoint = previousPose[index] ?? point;
+    const isLowConfidence = point.visibility < holdThreshold;
+
+    const distance = Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y);
+    const isImpossiblyFast = distance > resetDistance;
+
+    if (useIsolatedJointRejection && isImpossiblyFast && !isLowConfidence) {
+      if (landmarkState.holdFrames < maxHoldFrames) {
+        landmarkState.holdFrames += 1;
+        return {
+          x: previousPoint.x,
+          y: previousPoint.y,
+          visibility: clamp01(landmarkState.visibility),
+        };
+      } else {
+        landmarkState.xFilter.initialized = false;
+        landmarkState.yFilter.initialized = false;
+        landmarkState.holdFrames = 0;
+      }
+    }
+
+    if (isLowConfidence && landmarkState.holdFrames < maxHoldFrames) {
+      landmarkState.holdFrames += 1;
+      landmarkState.visibility += (point.visibility - landmarkState.visibility) * 0.2;
+      return {
+        x: previousPoint.x,
+        y: previousPoint.y,
+        visibility: clamp01(landmarkState.visibility),
+      };
+    }
+
+    landmarkState.holdFrames = 0;
+    const smoothedX = updateOneEuroScalar(landmarkState.xFilter, point.x, dtMs, params);
+    const smoothedY = updateOneEuroScalar(landmarkState.yFilter, point.y, dtMs, params);
+
+    let finalX = smoothedX;
+    let finalY = smoothedY;
+
+    if (lagMs > 0) {
+      const maxExtrapolationMs = clamp(lagMs, 0, 150);
+      const lagSeconds = maxExtrapolationMs / 1000;
+      finalX += landmarkState.xFilter.filteredDerivative * lagSeconds;
+      finalY += landmarkState.yFilter.filteredDerivative * lagSeconds;
+    }
+
+    const visibilityAlpha = clamp(0.52 - (normalizedStability * 0.28), 0.2, 0.52);
+    landmarkState.visibility += (point.visibility - landmarkState.visibility) * visibilityAlpha;
+
+    return {
+      x: finalX,
+      y: finalY,
+      visibility: clamp01(landmarkState.visibility),
+    };
+  });
+
+  return { pose: smoothedPose, state: nextState };
+};
+
 export default function PoseOverlay({
   enabled,
   videoElement,
@@ -235,8 +379,12 @@ export default function PoseOverlay({
   objectFit,
   modelVariant,
   targetFps,
+  useExactFrameSync,
   minVisibility,
   stability,
+  useOneEuroFilter,
+  useIsolatedJointRejection,
+  useLagExtrapolation,
   minPoseDetectionConfidence,
   minPosePresenceConfidence,
   minTrackingConfidence,
@@ -248,6 +396,7 @@ export default function PoseOverlay({
   const didLoopRecentlyRef = useRef(false);
   const smoothedPoseRef = useRef<ProjectedPoint[] | null>(null);
   const smoothedPoseMediaTimeRef = useRef<number | null>(null);
+  const oneEuroStateRef = useRef<OneEuroLandmarkState[] | null>(null);
   const forceSmoothingResetRef = useRef(false);
 
   const [isSelectingTarget, setIsSelectingTarget] = useState(false);
@@ -258,6 +407,7 @@ export default function PoseOverlay({
     videoElement,
     modelVariant,
     targetFps,
+    useExactFrameSync,
     minPoseDetectionConfidence,
     minPosePresenceConfidence,
     minTrackingConfidence,
@@ -280,9 +430,18 @@ export default function PoseOverlay({
     if (!enabled) {
       smoothedPoseRef.current = null;
       smoothedPoseMediaTimeRef.current = null;
+      oneEuroStateRef.current = null;
       forceSmoothingResetRef.current = false;
     }
   }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    smoothedPoseRef.current = null;
+    smoothedPoseMediaTimeRef.current = null;
+    oneEuroStateRef.current = null;
+    forceSmoothingResetRef.current = true;
+  }, [enabled, useOneEuroFilter]);
 
   useEffect(() => {
     const previous = previousMediaTimeRef.current;
@@ -358,15 +517,41 @@ export default function PoseOverlay({
   if (!selectedPose) {
     smoothedPoseRef.current = null;
     smoothedPoseMediaTimeRef.current = null;
+    oneEuroStateRef.current = null;
   } else if (forceSmoothingResetRef.current || smoothedPoseMediaTimeRef.current !== mediaTimeMs) {
     const previousTime = smoothedPoseMediaTimeRef.current;
     const shouldReset = forceSmoothingResetRef.current
       || previousTime === null
       || mediaTimeMs <= previousTime
       || mediaTimeMs - previousTime > 250;
-    const nextSmoothedPose = shouldReset
-      ? selectedPose
-      : smoothSelectedPose(
+
+    let nextSmoothedPose: ProjectedPoint[];
+    const isYoloModel = modelVariant.startsWith('yolo');
+
+    if (shouldReset || isYoloModel) {
+      nextSmoothedPose = selectedPose;
+      oneEuroStateRef.current = null;
+    } else if (useOneEuroFilter) {
+      const currentVideoTimeMs = videoElement && Number.isFinite(videoElement.currentTime)
+        ? Math.floor(videoElement.currentTime * 1000)
+        : mediaTimeMs;
+
+      const oneEuroResult = smoothSelectedPoseWithOneEuro(
+        selectedPose,
+        smoothedPoseRef.current,
+        oneEuroStateRef.current,
+        mediaTimeMs - previousTime,
+        sourceWidth,
+        sourceHeight,
+        stability,
+        minVisibility,
+        useIsolatedJointRejection,
+        useLagExtrapolation ? Math.max(0, currentVideoTimeMs - mediaTimeMs) : 0
+      );
+      nextSmoothedPose = oneEuroResult.pose;
+      oneEuroStateRef.current = oneEuroResult.state;
+    } else {
+      nextSmoothedPose = smoothSelectedPose(
         selectedPose,
         smoothedPoseRef.current,
         mediaTimeMs - previousTime,
@@ -374,6 +559,9 @@ export default function PoseOverlay({
         sourceHeight,
         stability
       );
+      oneEuroStateRef.current = null;
+    }
+
     smoothedPoseRef.current = nextSmoothedPose;
     smoothedPoseMediaTimeRef.current = mediaTimeMs;
     forceSmoothingResetRef.current = false;
@@ -558,7 +746,7 @@ export default function PoseOverlay({
         ) : (
           <div className="flex items-center gap-2">
             <span>
-              {`Pose ${status === 'loading' ? 'loading' : 'live'} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount} stab:${stability.toFixed(2)} · ${isLocked ? 'locked' : 'auto'}${isSelectingTarget ? ' (tap box)' : ''}`}
+              {`Pose ${status === 'loading' ? 'loading' : 'live'} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount} stab:${stability.toFixed(2)} ${useOneEuroFilter ? 'oe:on' : 'oe:off'} · ${isLocked ? 'locked' : 'auto'}${isSelectingTarget ? ' (tap box)' : ''}`}
             </span>
             {projectedPoses.length > 1 && !isLocked && (
               <button

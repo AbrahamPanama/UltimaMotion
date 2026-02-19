@@ -18,6 +18,7 @@ interface UsePoseLandmarksParams {
   videoElement: HTMLVideoElement | null;
   modelVariant: PoseModelVariant;
   targetFps: number;
+  useExactFrameSync: boolean;
   minPoseDetectionConfidence: number;
   minPosePresenceConfidence: number;
   minTrackingConfidence: number;
@@ -50,6 +51,7 @@ export function usePoseLandmarks({
   videoElement,
   modelVariant,
   targetFps,
+  useExactFrameSync,
   minPoseDetectionConfidence,
   minPosePresenceConfidence,
   minTrackingConfidence,
@@ -132,16 +134,30 @@ export function usePoseLandmarks({
       }
     };
 
-    const runInference = async (now: number, force: boolean) => {
+    let lastProcessedMediaTime = -1;
+
+    const runInference = async (now: number, force: boolean, metadata?: VideoFrameCallbackMetadata) => {
       if (cancelled || hasFatalError || !videoElement || isBusyRef.current) return;
       if (!force && document.hidden) return;
       if (videoElement.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
       if (!force && videoElement.paused) return;
-      if (!force && now - lastInferenceTimeRef.current < targetInterval) return;
 
-      const mediaTimeMs = Number.isFinite(videoElement.currentTime)
-        ? Math.floor(videoElement.currentTime * 1000)
-        : Math.floor(now);
+      if (!force) {
+        if (useExactFrameSync && metadata) {
+          if (metadata.mediaTime === lastProcessedMediaTime) return;
+        }
+        if (now - lastInferenceTimeRef.current < targetInterval) return;
+        if (useExactFrameSync && metadata) {
+          lastProcessedMediaTime = metadata.mediaTime;
+        }
+      }
+
+      const mediaTimeMs = useExactFrameSync && metadata
+        ? Math.floor(metadata.mediaTime * 1000)
+        : Number.isFinite(videoElement.currentTime)
+          ? Math.floor(videoElement.currentTime * 1000)
+          : Math.floor(now);
+
       setMediaTimeMs(mediaTimeMs);
       const candidateTs = mediaTimeMs;
       const previousTs = lastSubmittedTimestampMsRef.current;
@@ -181,9 +197,9 @@ export function usePoseLandmarks({
       rafHandle = requestAnimationFrame(frameLoop);
     };
 
-    const videoFrameLoop: VideoFrameCallback = (now) => {
+    const videoFrameLoop: VideoFrameCallback = (now, metadata) => {
       if (cancelled) return;
-      void runInference(now, false);
+      void runInference(now, false, metadata);
       if (videoWithCallback.requestVideoFrameCallback) {
         vfcHandle = videoWithCallback.requestVideoFrameCallback(videoFrameLoop);
       }
@@ -239,6 +255,7 @@ export function usePoseLandmarks({
     minTrackingConfidence,
     modelVariant,
     targetFps,
+    useExactFrameSync,
     videoElement,
   ]);
 

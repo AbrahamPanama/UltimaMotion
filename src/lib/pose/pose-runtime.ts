@@ -1,6 +1,7 @@
 import type { PoseModelVariant } from '@/types';
+import { OnnxPoseDelegate } from './onnx-pose-delegate';
 
-export type PoseDelegate = 'GPU' | 'CPU';
+export type PoseDelegate = 'GPU' | 'CPU' | 'WASM-ONNX' | 'WEBGPU-ONNX';
 
 export interface PoseRuntimeConfig {
   modelVariant: PoseModelVariant;
@@ -21,6 +22,8 @@ const MODEL_PATHS: Record<PoseModelVariant, string> = {
   lite: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
   full: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
   heavy: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task',
+  'yolo26-nano': '/models/yolo26/yolo26n-pose.onnx',
+  'yolo26-small': '/models/yolo26/yolo26s-pose.onnx',
 };
 
 const buildOptionsKey = (config: PoseRuntimeConfig) =>
@@ -41,6 +44,7 @@ export class PoseRuntime {
   private delegate: PoseDelegate | null = null;
   private appliedOptionsKey = '';
   private initPromise: Promise<void> | null = null;
+  private onnxDelegate: OnnxPoseDelegate | null = null;
 
   private async getVisionLib() {
     if (!this.visionLib) {
@@ -138,11 +142,48 @@ export class PoseRuntime {
     }
   }
 
+  private async ensureOnnxReady(config: PoseRuntimeConfig) {
+    if (this.initPromise) {
+      await this.initPromise;
+    }
+
+    const needsModelReload = !this.onnxDelegate || this.modelVariant !== config.modelVariant;
+
+    if (needsModelReload) {
+      this.initPromise = (async () => {
+        this.onnxDelegate?.close();
+        this.onnxDelegate = new OnnxPoseDelegate();
+
+        const isNano = config.modelVariant === 'yolo26-nano';
+        const modelPath = isNano ? '/models/yolo26/yolo26n-pose.onnx' : '/models/yolo26/yolo26s-pose.onnx';
+        const absoluteUrl = new URL(modelPath, window.location.origin).href;
+
+        await this.onnxDelegate.initialize(absoluteUrl);
+
+        const onnxProvider = this.onnxDelegate.getExecutionProvider();
+        this.delegate = onnxProvider === 'webgpu' ? 'WEBGPU-ONNX' : 'WASM-ONNX';
+        this.modelVariant = config.modelVariant;
+      })();
+
+      try {
+        await this.initPromise;
+      } finally {
+        this.initPromise = null;
+      }
+    }
+  }
+
   async detectForVideo(
     videoFrame: TexImageSource,
     timestampMs: number,
     config: PoseRuntimeConfig
   ): Promise<import('@mediapipe/tasks-vision').PoseLandmarkerResult | null> {
+    if (config.modelVariant.startsWith('yolo')) {
+      await this.ensureOnnxReady(config);
+      if (!this.onnxDelegate) return null;
+      return this.onnxDelegate.detect(videoFrame as HTMLVideoElement);
+    }
+
     await this.ensureReady(config);
     if (!this.landmarker) return null;
     return this.landmarker.detectForVideo(videoFrame, timestampMs);
@@ -158,6 +199,8 @@ export class PoseRuntime {
   close() {
     this.landmarker?.close();
     this.landmarker = null;
+    this.onnxDelegate?.close();
+    this.onnxDelegate = null;
     this.appliedOptionsKey = '';
     this.modelVariant = null;
     this.delegate = null;

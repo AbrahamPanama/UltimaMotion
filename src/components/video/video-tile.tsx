@@ -55,7 +55,11 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     poseModelVariant,
     poseMinVisibility,
     poseStability,
+    poseUseOneEuroFilter,
     poseTargetFps,
+    poseUseExactFrameSync,
+    poseUseIsolatedJointRejection,
+    poseUseLagExtrapolation,
     poseMinPoseDetectionConfidence,
     poseMinPosePresenceConfidence,
     poseMinTrackingConfidence
@@ -125,7 +129,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
         element.playbackRate = playbackRate;
 
         if (wasPlayingBeforeHiddenRef.current) {
-          element.play().catch(() => {});
+          element.play().catch(() => { });
         } else {
           element.pause();
         }
@@ -244,7 +248,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const handlePlayPause = () => {
     const videoElement = videoRef.current;
     if (videoElement) {
-      if (videoElement.paused) videoElement.play().catch(() => {});
+      if (videoElement.paused) videoElement.play().catch(() => { });
       else videoElement.pause();
     }
   };
@@ -543,8 +547,12 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
             objectFit={isPortraitMode ? 'cover' : 'contain'}
             modelVariant={poseModelVariant}
             targetFps={poseTargetFps}
+            useExactFrameSync={poseUseExactFrameSync}
             minVisibility={poseMinVisibility}
             stability={poseStability}
+            useOneEuroFilter={poseUseOneEuroFilter}
+            useIsolatedJointRejection={poseUseIsolatedJointRejection}
+            useLagExtrapolation={poseUseLagExtrapolation}
             minPoseDetectionConfidence={poseMinPoseDetectionConfidence}
             minPosePresenceConfidence={poseMinPosePresenceConfidence}
             minTrackingConfidence={poseMinTrackingConfidence}
