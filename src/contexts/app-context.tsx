@@ -68,6 +68,8 @@ interface AppContextType {
   setPoseAnalyzeScope: (scope: PoseAnalyzeScope) => void;
   poseMinVisibility: number;
   setPoseMinVisibility: (value: number) => void;
+  poseStability: number;
+  setPoseStability: (value: number) => void;
   poseTargetFps: number;
   setPoseTargetFps: (value: number) => void;
   poseMinPoseDetectionConfidence: number;
@@ -111,6 +113,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('full');
   const [poseAnalyzeScope, setPoseAnalyzeScope] = useState<PoseAnalyzeScope>('active-tile');
   const [poseMinVisibility, setPoseMinVisibility] = useState<number>(0.25);
+  const [poseStability, setPoseStability] = useState<number>(0.65);
   const [poseTargetFps, setPoseTargetFps] = useState<number>(15);
   const [poseMinPoseDetectionConfidence, setPoseMinPoseDetectionConfidence] = useState<number>(0.35);
   const [poseMinPosePresenceConfidence, setPoseMinPosePresenceConfidence] = useState<number>(0.35);
@@ -259,10 +262,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const togglePose = () => setIsPoseEnabled(prev => !prev);
 
   const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
-  const clampFps = (value: number) => Math.max(5, Math.min(30, Math.round(value)));
+  const clampFps = (value: number) => Math.max(5, Math.min(60, Math.round(value)));
 
   const handleSetPoseMinVisibility = (value: number) => {
     setPoseMinVisibility(clampUnit(value));
+  };
+
+  const handleSetPoseStability = (value: number) => {
+    setPoseStability(clampUnit(value));
   };
 
   const handleSetPoseTargetFps = (value: number) => {
@@ -374,6 +381,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseAnalyzeScope,
     poseMinVisibility,
     setPoseMinVisibility: handleSetPoseMinVisibility,
+    poseStability,
+    setPoseStability: handleSetPoseStability,
     poseTargetFps,
     setPoseTargetFps: handleSetPoseTargetFps,
     poseMinPoseDetectionConfidence,

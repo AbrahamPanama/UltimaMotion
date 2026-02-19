@@ -55,6 +55,8 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         setPoseAnalyzeScope,
         poseMinVisibility,
         setPoseMinVisibility,
+        poseStability,
+        setPoseStability,
         poseTargetFps,
         setPoseTargetFps,
         poseMinPoseDetectionConfidence,
@@ -358,7 +360,7 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                             <Slider
                                 value={[poseTargetFps]}
                                 min={5}
-                                max={30}
+                                max={60}
                                 step={1}
                                 onValueChange={(value) => setPoseTargetFps(value[0])}
                             />
@@ -375,6 +377,20 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                 max={1}
                                 step={0.05}
                                 onValueChange={(value) => setPoseMinVisibility(value[0])}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                <span>Stability</span>
+                                <span>{poseStability.toFixed(2)}</span>
+                            </div>
+                            <Slider
+                                value={[poseStability]}
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                onValueChange={(value) => setPoseStability(value[0])}
                             />
                         </div>
 

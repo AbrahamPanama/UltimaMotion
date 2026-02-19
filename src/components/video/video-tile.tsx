@@ -54,6 +54,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     poseAnalyzeScope,
     poseModelVariant,
     poseMinVisibility,
+    poseStability,
     poseTargetFps,
     poseMinPoseDetectionConfidence,
     poseMinPosePresenceConfidence,
@@ -543,6 +544,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
             modelVariant={poseModelVariant}
             targetFps={poseTargetFps}
             minVisibility={poseMinVisibility}
+            stability={poseStability}
             minPoseDetectionConfidence={poseMinPoseDetectionConfidence}
             minPosePresenceConfidence={poseMinPosePresenceConfidence}
             minTrackingConfidence={poseMinTrackingConfidence}

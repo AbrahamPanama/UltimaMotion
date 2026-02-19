@@ -28,6 +28,7 @@ interface PoseOverlayProps {
   modelVariant: PoseModelVariant;
   targetFps: number;
   minVisibility: number;
+  stability: number;
   minPoseDetectionConfidence: number;
   minPosePresenceConfidence: number;
   minTrackingConfidence: number;
@@ -48,7 +49,16 @@ interface PoseBox {
   center: { x: number; y: number };
 }
 
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const SMOOTHING_BASE_ALPHA = 0.24;
+const SMOOTHING_MAX_ALPHA = 0.82;
+const SMOOTHING_MIN_ALPHA = 0.06;
+const SMOOTHING_VISIBILITY_WEIGHT = 0.5;
+const SMOOTHING_RESET_DISTANCE_MIN_RATIO = 0.16;
+const SMOOTHING_RESET_DISTANCE_MAX_RATIO = 0.28;
+const SMOOTHING_MIN_DT_MS = 8;
+const SMOOTHING_MAX_DT_MS = 120;
 
 const normalizeLandmarks = (
   landmarks: NormalizedLandmark[],
@@ -164,6 +174,59 @@ const getAutoPoseIndex = (poses: ProjectedPoint[][]) => {
   return bestIndex;
 };
 
+const smoothSelectedPose = (
+  nextPose: ProjectedPoint[],
+  previousPose: ProjectedPoint[] | null,
+  dtMs: number,
+  sourceWidth: number,
+  sourceHeight: number,
+  stability: number
+) => {
+  if (!previousPose || previousPose.length !== nextPose.length) {
+    return nextPose;
+  }
+
+  const normalizedStability = clamp01(stability);
+  const boundedDtMs = clamp(dtMs, SMOOTHING_MIN_DT_MS, SMOOTHING_MAX_DT_MS);
+  const sourceDiagonal = Math.hypot(sourceWidth, sourceHeight);
+  const resetDistanceRatio = SMOOTHING_RESET_DISTANCE_MAX_RATIO
+    - ((SMOOTHING_RESET_DISTANCE_MAX_RATIO - SMOOTHING_RESET_DISTANCE_MIN_RATIO) * normalizedStability);
+  const resetDistance = sourceDiagonal * resetDistanceRatio;
+
+  const hasLargeJump = nextPose.some((point, index) => {
+    const previousPoint = previousPose[index];
+    if (!previousPoint) return true;
+    return Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y) > resetDistance;
+  });
+
+  if (hasLargeJump) {
+    return nextPose;
+  }
+
+  return nextPose.map((point, index) => {
+    const previousPoint = previousPose[index];
+    if (!previousPoint) return point;
+
+    const distance = Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y);
+    const speedPxPerMs = distance / boundedDtMs;
+    const motionBlend = clamp01(speedPxPerMs / 1.6);
+    const visibilityBlend = (1 - SMOOTHING_VISIBILITY_WEIGHT) + (SMOOTHING_VISIBILITY_WEIGHT * point.visibility);
+    const adaptiveAlpha = clamp(
+      (SMOOTHING_BASE_ALPHA + ((SMOOTHING_MAX_ALPHA - SMOOTHING_BASE_ALPHA) * motionBlend)) * visibilityBlend,
+      SMOOTHING_MIN_ALPHA,
+      SMOOTHING_MAX_ALPHA
+    );
+    const alpha = clamp((1 - normalizedStability) + (normalizedStability * adaptiveAlpha), SMOOTHING_MIN_ALPHA, 1);
+    const visibilityAlpha = clamp(0.6 - (normalizedStability * 0.35), 0.22, 0.6);
+
+    return {
+      x: previousPoint.x + ((point.x - previousPoint.x) * alpha),
+      y: previousPoint.y + ((point.y - previousPoint.y) * alpha),
+      visibility: previousPoint.visibility + ((point.visibility - previousPoint.visibility) * visibilityAlpha),
+    };
+  });
+};
+
 export default function PoseOverlay({
   enabled,
   videoElement,
@@ -173,6 +236,7 @@ export default function PoseOverlay({
   modelVariant,
   targetFps,
   minVisibility,
+  stability,
   minPoseDetectionConfidence,
   minPosePresenceConfidence,
   minTrackingConfidence,
@@ -182,6 +246,9 @@ export default function PoseOverlay({
   const lockedPoseIndexHintRef = useRef<number | null>(null);
   const previousMediaTimeRef = useRef<number | null>(null);
   const didLoopRecentlyRef = useRef(false);
+  const smoothedPoseRef = useRef<ProjectedPoint[] | null>(null);
+  const smoothedPoseMediaTimeRef = useRef<number | null>(null);
+  const forceSmoothingResetRef = useRef(false);
 
   const [isSelectingTarget, setIsSelectingTarget] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
@@ -210,9 +277,18 @@ export default function PoseOverlay({
   }, [projectedPoses.length]);
 
   useEffect(() => {
+    if (!enabled) {
+      smoothedPoseRef.current = null;
+      smoothedPoseMediaTimeRef.current = null;
+      forceSmoothingResetRef.current = false;
+    }
+  }, [enabled]);
+
+  useEffect(() => {
     const previous = previousMediaTimeRef.current;
     if (previous !== null && mediaTimeMs + 150 < previous) {
       didLoopRecentlyRef.current = true;
+      forceSmoothingResetRef.current = true;
     }
     previousMediaTimeRef.current = mediaTimeMs;
   }, [mediaTimeMs]);
@@ -278,13 +354,41 @@ export default function PoseOverlay({
   }
 
   const selectedPose = selectedPoseIndex >= 0 ? projectedPoses[selectedPoseIndex] : null;
-  const selectedBox = selectedPoseIndex >= 0 ? projectedBoxes[selectedPoseIndex] : null;
-  const drawPose = selectedPose && selectedPose.length > 0;
-  const visibleLandmarkCount = selectedPose
-    ? selectedPose.filter((point) => point.visibility >= minVisibility).length
+
+  if (!selectedPose) {
+    smoothedPoseRef.current = null;
+    smoothedPoseMediaTimeRef.current = null;
+  } else if (forceSmoothingResetRef.current || smoothedPoseMediaTimeRef.current !== mediaTimeMs) {
+    const previousTime = smoothedPoseMediaTimeRef.current;
+    const shouldReset = forceSmoothingResetRef.current
+      || previousTime === null
+      || mediaTimeMs <= previousTime
+      || mediaTimeMs - previousTime > 250;
+    const nextSmoothedPose = shouldReset
+      ? selectedPose
+      : smoothSelectedPose(
+        selectedPose,
+        smoothedPoseRef.current,
+        mediaTimeMs - previousTime,
+        sourceWidth,
+        sourceHeight,
+        stability
+      );
+    smoothedPoseRef.current = nextSmoothedPose;
+    smoothedPoseMediaTimeRef.current = mediaTimeMs;
+    forceSmoothingResetRef.current = false;
+  }
+
+  const selectedPoseForRender = smoothedPoseRef.current ?? selectedPose;
+  const selectedBox = selectedPoseForRender
+    ? getPoseBox(selectedPoseForRender, sourceWidth, sourceHeight)
+    : null;
+  const drawPose = selectedPoseForRender && selectedPoseForRender.length > 0;
+  const visibleLandmarkCount = selectedPoseForRender
+    ? selectedPoseForRender.filter((point) => point.visibility >= minVisibility).length
     : 0;
   const relaxedVisibilityGate = visibleLandmarkCount === 0;
-  const landmarkCount = selectedPose?.length ?? 0;
+  const landmarkCount = selectedPoseForRender?.length ?? 0;
   const preserveAspectRatio = objectFit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet';
 
   const handleTapToLock = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -319,6 +423,7 @@ export default function PoseOverlay({
 
     lockAnchorRef.current = center;
     lockedPoseIndexHintRef.current = targetIndex;
+    forceSmoothingResetRef.current = true;
     setIsLocked(true);
     setIsSelectingTarget(false);
   };
@@ -326,6 +431,7 @@ export default function PoseOverlay({
   const handleUnlock = () => {
     lockAnchorRef.current = null;
     lockedPoseIndexHintRef.current = null;
+    forceSmoothingResetRef.current = true;
     setIsLocked(false);
     setIsSelectingTarget(false);
   };
@@ -394,9 +500,9 @@ export default function PoseOverlay({
         )}
 
         {drawPose && POSE_CONNECTIONS.map(([fromIndex, toIndex]) => {
-          if (!selectedPose) return null;
-          const from = selectedPose[fromIndex];
-          const to = selectedPose[toIndex];
+          if (!selectedPoseForRender) return null;
+          const from = selectedPoseForRender[fromIndex];
+          const to = selectedPoseForRender[toIndex];
           if (!from || !to) return null;
           const lineGate = Math.min(minVisibility, 0.05);
           if (!relaxedVisibilityGate && (from.visibility < lineGate || to.visibility < lineGate)) return null;
@@ -419,7 +525,7 @@ export default function PoseOverlay({
           );
         })}
 
-        {drawPose && selectedPose?.map((point, index) => {
+        {drawPose && selectedPoseForRender?.map((point, index) => {
           if (!relaxedVisibilityGate && point.visibility < minVisibility) return null;
           const opacity = relaxedVisibilityGate
             ? Math.max(0.35, point.visibility || 0)
@@ -452,7 +558,7 @@ export default function PoseOverlay({
         ) : (
           <div className="flex items-center gap-2">
             <span>
-              {`Pose ${status === 'loading' ? 'loading' : 'live'} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount} · ${isLocked ? 'locked' : 'auto'}${isSelectingTarget ? ' (tap box)' : ''}`}
+              {`Pose ${status === 'loading' ? 'loading' : 'live'} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount} stab:${stability.toFixed(2)} · ${isLocked ? 'locked' : 'auto'}${isSelectingTarget ? ' (tap box)' : ''}`}
             </span>
             {projectedPoses.length > 1 && !isLocked && (
               <button
