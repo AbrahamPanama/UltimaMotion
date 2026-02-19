@@ -12,6 +12,9 @@ export type Video = {
 
 export type DrawingType = 'free' | 'line' | 'arrow' | 'angle' | 'rectangle' | 'circle' | 'text';
 
+export type PoseModelVariant = 'lite' | 'full' | 'heavy';
+export type PoseAnalyzeScope = 'active-tile' | 'all-visible';
+
 export interface Point {
     x: number;
     y: number;

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
-import type { Video, Drawing, DrawingType } from '@/types';
+import type { Video, Drawing, DrawingType, PoseModelVariant, PoseAnalyzeScope } from '@/types';
 import { initDB, getAllVideos, addVideo as addVideoDB, deleteVideo as deleteVideoDB } from '@/lib/db';
 import { useToast } from "@/hooks/use-toast";
 
@@ -58,6 +58,24 @@ interface AppContextType {
   drawings: Record<string, Drawing[]>;
   setDrawingsForVideo: (videoId: string, newDrawings: Drawing[]) => void;
   clearDrawings: (videoId: string) => void;
+
+  // Pose overlay state
+  isPoseEnabled: boolean;
+  togglePose: () => void;
+  poseModelVariant: PoseModelVariant;
+  setPoseModelVariant: (variant: PoseModelVariant) => void;
+  poseAnalyzeScope: PoseAnalyzeScope;
+  setPoseAnalyzeScope: (scope: PoseAnalyzeScope) => void;
+  poseMinVisibility: number;
+  setPoseMinVisibility: (value: number) => void;
+  poseTargetFps: number;
+  setPoseTargetFps: (value: number) => void;
+  poseMinPoseDetectionConfidence: number;
+  setPoseMinPoseDetectionConfidence: (value: number) => void;
+  poseMinPosePresenceConfidence: number;
+  setPoseMinPosePresenceConfidence: (value: number) => void;
+  poseMinTrackingConfidence: number;
+  setPoseMinTrackingConfidence: (value: number) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -87,6 +105,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [drawingTool, setDrawingTool] = useState<DrawingType>('free');
   const [drawingColor, setDrawingColor] = useState<string>('#ef4444'); // Default red
   const [drawings, setDrawings] = useState<Record<string, Drawing[]>>({});
+
+  // Pose overlay state
+  const [isPoseEnabled, setIsPoseEnabled] = useState<boolean>(false);
+  const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('full');
+  const [poseAnalyzeScope, setPoseAnalyzeScope] = useState<PoseAnalyzeScope>('active-tile');
+  const [poseMinVisibility, setPoseMinVisibility] = useState<number>(0.25);
+  const [poseTargetFps, setPoseTargetFps] = useState<number>(15);
+  const [poseMinPoseDetectionConfidence, setPoseMinPoseDetectionConfidence] = useState<number>(0.35);
+  const [poseMinPosePresenceConfidence, setPoseMinPosePresenceConfidence] = useState<number>(0.35);
+  const [poseMinTrackingConfidence, setPoseMinTrackingConfidence] = useState<number>(0.35);
 
   const loadLibrary = useCallback(async () => {
     try {
@@ -228,6 +256,30 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const toggleMute = () => setIsMuted(prev => !prev);
 
   const toggleDrawing = () => setIsDrawingEnabled(prev => !prev);
+  const togglePose = () => setIsPoseEnabled(prev => !prev);
+
+  const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
+  const clampFps = (value: number) => Math.max(5, Math.min(30, Math.round(value)));
+
+  const handleSetPoseMinVisibility = (value: number) => {
+    setPoseMinVisibility(clampUnit(value));
+  };
+
+  const handleSetPoseTargetFps = (value: number) => {
+    setPoseTargetFps(clampFps(value));
+  };
+
+  const handleSetPoseMinPoseDetectionConfidence = (value: number) => {
+    setPoseMinPoseDetectionConfidence(clampUnit(value));
+  };
+
+  const handleSetPoseMinPosePresenceConfidence = (value: number) => {
+    setPoseMinPosePresenceConfidence(clampUnit(value));
+  };
+
+  const handleSetPoseMinTrackingConfidence = (value: number) => {
+    setPoseMinTrackingConfidence(clampUnit(value));
+  };
 
   const updateSyncOffset = useCallback((index: number, delta: number) => {
     setSyncOffsets(prev => {
@@ -311,7 +363,25 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setDrawingColor,
     drawings,
     setDrawingsForVideo,
-    clearDrawings
+    clearDrawings,
+
+    // Pose overlay
+    isPoseEnabled,
+    togglePose,
+    poseModelVariant,
+    setPoseModelVariant,
+    poseAnalyzeScope,
+    setPoseAnalyzeScope,
+    poseMinVisibility,
+    setPoseMinVisibility: handleSetPoseMinVisibility,
+    poseTargetFps,
+    setPoseTargetFps: handleSetPoseTargetFps,
+    poseMinPoseDetectionConfidence,
+    setPoseMinPoseDetectionConfidence: handleSetPoseMinPoseDetectionConfidence,
+    poseMinPosePresenceConfidence,
+    setPoseMinPosePresenceConfidence: handleSetPoseMinPosePresenceConfidence,
+    poseMinTrackingConfidence,
+    setPoseMinTrackingConfidence: handleSetPoseMinTrackingConfidence
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

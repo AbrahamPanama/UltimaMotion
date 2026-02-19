@@ -5,8 +5,6 @@ import { cn } from '@/lib/utils';
 import type { Drawing, DrawingType, Point } from '@/types';
 
 interface DrawingCanvasProps {
-  width: number;
-  height: number;
   scale: number;
   position: { x: number; y: number };
   tool: DrawingType;
@@ -17,8 +15,6 @@ interface DrawingCanvasProps {
 }
 
 export default function DrawingCanvas({
-  width,
-  height,
   scale,
   position,
   tool,
@@ -301,7 +297,6 @@ export default function DrawingCanvas({
           transform: `scale(${scale}) translate(${position.x / scale}px, ${position.y / scale}px)`,
           transformOrigin: '50% 50%',
         }}
-        viewBox={`0 0 ${Math.max(1, width)} ${Math.max(1, height)}`}
       >
         {drawings.map((drawing) => renderDrawing(drawing))}
         {currentDrawing && renderDrawing(currentDrawing, true)}

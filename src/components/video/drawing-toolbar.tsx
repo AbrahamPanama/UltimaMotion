@@ -2,15 +2,23 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Pencil, MoveUpRight, Circle, Trash2, Undo2, Minus, Square, Type } from 'lucide-react';
+import { Pencil, MoveUpRight, Circle, Trash2, Undo2, Minus, Square, Type, Activity } from 'lucide-react';
 import { useAppContext } from '@/contexts/app-context';
 import { cn } from '@/lib/utils';
-import type { DrawingType } from '@/types';
+import type { DrawingType, PoseAnalyzeScope, PoseModelVariant } from '@/types';
 import {
     Popover,
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
 
 const COLORS = [
     { name: 'Red', value: '#ef4444' },
@@ -37,13 +45,32 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         setDrawingsForVideo,
         activeTileIndex,
         slots,
-        clearDrawings
+        clearDrawings,
+        // Pose overlay
+        isPoseEnabled,
+        togglePose,
+        poseModelVariant,
+        setPoseModelVariant,
+        poseAnalyzeScope,
+        setPoseAnalyzeScope,
+        poseMinVisibility,
+        setPoseMinVisibility,
+        poseTargetFps,
+        setPoseTargetFps,
+        poseMinPoseDetectionConfidence,
+        setPoseMinPoseDetectionConfidence,
+        poseMinPosePresenceConfidence,
+        setPoseMinPosePresenceConfidence,
+        poseMinTrackingConfidence,
+        setPoseMinTrackingConfidence
     } = useAppContext();
 
     const activeVideo = activeTileIndex !== null ? slots[activeTileIndex] : null;
     const currentDrawings = activeVideo ? (drawings[activeVideo.id] || []) : [];
     const hasActiveVideo = !!activeVideo;
+    const hasAnyVideo = slots.some((slot) => slot !== null);
     const canEdit = isDrawingEnabled && hasActiveVideo;
+    const canPose = hasAnyVideo;
 
     const handleClear = () => {
         if (activeVideo) {
@@ -69,9 +96,14 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         setDrawingTool(tool);
     };
 
+    const handleTogglePose = () => {
+        if (!canPose) return;
+        togglePose();
+    };
+
     return (
         <div className={cn(
-            "grid h-full grid-cols-1 grid-rows-2 gap-2 rounded-lg border border-border/70 bg-background p-2.5",
+            "grid h-full grid-cols-1 gap-2 rounded-lg border border-border/70 bg-background p-2.5",
             className
         )}>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(132px,auto),1fr]">
@@ -209,7 +241,7 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                 </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Popover>
                     <PopoverTrigger asChild>
                         <Button
@@ -242,6 +274,22 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
 
                 <Button
                     variant="ghost"
+                    className={cn(
+                        "h-10 justify-center gap-2 rounded-md border text-foreground hover:bg-secondary disabled:opacity-50",
+                        isPoseEnabled
+                            ? "border-teal-500/40 bg-teal-500/10 text-teal-700 dark:text-teal-300 hover:bg-teal-500/15"
+                            : "border-border/70",
+                    )}
+                    onClick={handleTogglePose}
+                    disabled={!canPose}
+                    title={isPoseEnabled ? 'Disable pose overlay' : 'Enable pose overlay'}
+                >
+                    <Activity className={cn("h-4 w-4", isPoseEnabled && "animate-pulse")} />
+                    <span className="text-sm font-medium">Pose</span>
+                </Button>
+
+                <Button
+                    variant="ghost"
                     className="h-10 justify-center gap-2 rounded-md border border-border/70 text-foreground hover:bg-secondary disabled:opacity-50"
                     onClick={handleUndo}
                     disabled={!canEdit || currentDrawings.length === 0}
@@ -262,6 +310,118 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                     <span className="text-sm font-medium">Clear</span>
                 </Button>
             </div>
+
+            {isPoseEnabled && (
+                <div className={cn(
+                    "rounded-md border border-teal-500/25 bg-teal-500/5 p-2",
+                    !canPose && "opacity-60"
+                )}>
+                    <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Model</p>
+                            <Select
+                                value={poseModelVariant}
+                                onValueChange={(value) => setPoseModelVariant(value as PoseModelVariant)}
+                            >
+                                <SelectTrigger className="h-9">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="lite">Lite (faster)</SelectItem>
+                                    <SelectItem value="full">Full (balanced)</SelectItem>
+                                    <SelectItem value="heavy">Heavy (most accurate)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Scope</p>
+                            <Select
+                                value={poseAnalyzeScope}
+                                onValueChange={(value) => setPoseAnalyzeScope(value as PoseAnalyzeScope)}
+                            >
+                                <SelectTrigger className="h-9">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="active-tile">Active tile only</SelectItem>
+                                    <SelectItem value="all-visible">All visible tiles</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                <span>Inference FPS</span>
+                                <span>{poseTargetFps}</span>
+                            </div>
+                            <Slider
+                                value={[poseTargetFps]}
+                                min={5}
+                                max={30}
+                                step={1}
+                                onValueChange={(value) => setPoseTargetFps(value[0])}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                <span>Min Visibility</span>
+                                <span>{poseMinVisibility.toFixed(2)}</span>
+                            </div>
+                            <Slider
+                                value={[poseMinVisibility]}
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                onValueChange={(value) => setPoseMinVisibility(value[0])}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                <span>Detection Conf.</span>
+                                <span>{poseMinPoseDetectionConfidence.toFixed(2)}</span>
+                            </div>
+                            <Slider
+                                value={[poseMinPoseDetectionConfidence]}
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                onValueChange={(value) => setPoseMinPoseDetectionConfidence(value[0])}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                <span>Presence Conf.</span>
+                                <span>{poseMinPosePresenceConfidence.toFixed(2)}</span>
+                            </div>
+                            <Slider
+                                value={[poseMinPosePresenceConfidence]}
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                onValueChange={(value) => setPoseMinPosePresenceConfidence(value[0])}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                <span>Tracking Conf.</span>
+                                <span>{poseMinTrackingConfidence.toFixed(2)}</span>
+                            </div>
+                            <Slider
+                                value={[poseMinTrackingConfidence]}
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                onValueChange={(value) => setPoseMinTrackingConfidence(value[0])}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

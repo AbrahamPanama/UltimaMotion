@@ -14,12 +14,15 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import DrawingCanvas from './drawing-canvas';
+import PoseOverlay from './pose-overlay';
 
 interface VideoTileProps {
   video: Video | null;
   index: number;
   isActive: boolean;
 }
+
+const DEFAULT_POSITION = { x: 0, y: 0 };
 
 export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const {
@@ -45,7 +48,16 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     drawingTool,
     drawingColor,
     drawings,
-    setDrawingsForVideo
+    setDrawingsForVideo,
+    // Pose overlay
+    isPoseEnabled,
+    poseAnalyzeScope,
+    poseModelVariant,
+    poseMinVisibility,
+    poseTargetFps,
+    poseMinPoseDetectionConfidence,
+    poseMinPosePresenceConfidence,
+    poseMinTrackingConfidence
   } = useAppContext();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -53,6 +65,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
@@ -63,10 +76,11 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
 
   const { toast } = useToast();
 
-  const scale = zoomLevels[index] || 1;
-  const position = panPositions[index] || { x: 0, y: 0 };
+  const scale = zoomLevels[index] ?? 1;
+  const position = panPositions[index] ?? DEFAULT_POSITION;
 
   const currentDrawings = video ? (drawings[video.id] || []) : [];
+  const shouldAnalyzePose = Boolean(video) && isPoseEnabled && (poseAnalyzeScope === 'all-visible' || isActive);
 
   // Handle ref assignment and cleanup
   useEffect(() => {
@@ -74,10 +88,12 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     if (refs) {
       refs[index] = videoRef.current;
     }
+    setVideoElement(videoRef.current);
     return () => {
       if (refs) {
         refs[index] = null;
       }
+      setVideoElement(null);
     };
   }, [index, videoRefs, video]);
 
@@ -518,9 +534,23 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
 
         {/* Drawing Canvas Overlay */}
         {video && (
+          <PoseOverlay
+            enabled={shouldAnalyzePose}
+            videoElement={videoElement}
+            scale={scale}
+            position={position}
+            objectFit={isPortraitMode ? 'cover' : 'contain'}
+            modelVariant={poseModelVariant}
+            targetFps={poseTargetFps}
+            minVisibility={poseMinVisibility}
+            minPoseDetectionConfidence={poseMinPoseDetectionConfidence}
+            minPosePresenceConfidence={poseMinPosePresenceConfidence}
+            minTrackingConfidence={poseMinTrackingConfidence}
+          />
+        )}
+
+        {video && (
           <DrawingCanvas
-            width={containerRef.current?.clientWidth || 0}
-            height={containerRef.current?.clientHeight || 0}
             scale={scale}
             position={position}
             tool={drawingTool}
