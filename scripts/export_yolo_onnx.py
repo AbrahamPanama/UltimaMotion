@@ -35,7 +35,7 @@ def export_models():
                 simplify=True,
                 dynamic=False,
                 half=True,
-                opset=12
+                opset=17   # opset 17 rewrote the Resize op with full WebGPU JSEP support
             )
             
             # Move the exported .onnx file to the target directory

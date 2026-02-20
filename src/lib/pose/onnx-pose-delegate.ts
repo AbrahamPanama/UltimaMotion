@@ -162,49 +162,24 @@ export class OnnxPoseDelegate {
         const dataLength = data.length;
         const inv255 = 1.0 / 255.0; // Multiplication is much faster than division
 
-        // Convert to float16 tensor (1, 3, 640, 640)
-        // Since we exported with half=True, the model expects FP16.
-        // We can't use Float16Array directly in all TS environments without polyfills,
-        // but ORT allows passing Float32Array and letting it cast, or we can use Uint16Array
-        // if we pack it ourselves. Let's stick to Float32Array mathematically, 
-        // ORT will handle the type conversion to 'float16' if we tell it the tensor is float16.
+        // Convert to float32 tensor (1, 3, 640, 640)
+        // Note: Even though we exported the model with half=True, the model
+        // signatures still expect an FP32 input tensor and will internally cast.
+        const float32Data = new Float32Array(3 * targetSize * targetSize);
 
-        // Wait, passing Float32Array as 'float16' might throw a type error in JS ORT because 
-        // the typed array length wouldn't match the byte length expected.
-        // The safest approach given we exported with half=True is to construct the tensor with float16 type
-        // Currently, JS Float16Array is supported in modern browsers (like Safari on M4).
-        // Let's use the explicit conversion using DataView or just use Float32Array and tensor type 'float32'
-        // If the ONNX model is purely FP16, ORT WebGPU *requires* Float16Array or casts it appropriately.
-        // Actually, the user's snippet: const inputTensor = new ort.Tensor('float16', float16Data, [1, 3, 640, 640]);
-        // Let's follow that.
-
-        // In ES2024+, Float16Array exists. If not, we can use Uint16Array. 
-        // Given we are on an M4 Mac running bleeding-edge, Float16Array is available.
-        // However, typescript might complain if Float16Array isn't in lib. Let's use Uint16Array for the binary representation
-        // Wait, the fastest way to get half precision floats in JS is using a snippet or just leaving it as Float32Array 
-        // and letting ORT cast it, OR changing the tensor type.
-        // Let's use the user's exact suggestion:
-        // const inputTensor = new ort.Tensor('float16', float16Data, [1, 3, 640, 640]);
-        // To build float16Data without Float16Array typed array built-in, we can use a helper,
-        // or just let ORT cast it by using 'float32' - ORT WebGPU usually handles input casting.
-        // Let's keep the user's requested 'float32' or just pass standard Float32Array. 
-        // The user's code: // Example inference loop (use 'float16' if you exported with half=True)
-        // Actually, if we exported `half=True`, ORT Web expects float16 input. 
-        // Let's write a simple float32 to float16 conversion to be safe.
-
-        const float16Data = new Uint16Array(3 * targetSize * targetSize);
+        // BCHW format
         let rIndex = 0;
         let gIndex = targetSize * targetSize;
         let bIndex = targetSize * targetSize * 2;
 
         for (let i = 0; i < dataLength; i += 4) {
-            // Very basic Float32 to Float16 conversion
-            float16Data[rIndex++] = roundToFloat16Bits(data[i] * inv255);
-            float16Data[gIndex++] = roundToFloat16Bits(data[i + 1] * inv255);
-            float16Data[bIndex++] = roundToFloat16Bits(data[i + 2] * inv255);
+            float32Data[rIndex++] = data[i] * inv255;     // R
+            float32Data[gIndex++] = data[i + 1] * inv255; // G
+            float32Data[bIndex++] = data[i + 2] * inv255; // B
+            // Ignore Alpha channel
         }
 
-        return new this.ort!.Tensor('float16', float16Data, [1, 3, targetSize, targetSize]);
+        return new this.ort!.Tensor('float32', float32Data, [1, 3, targetSize, targetSize]);
     }
 
     private postprocess(tensor: Tensor, originalWidth: number, originalHeight: number): NormalizedLandmark[] | null {

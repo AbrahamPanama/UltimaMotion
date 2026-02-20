@@ -358,7 +358,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     setPanPosition(index, { x: clampedX, y: clampedY });
   }, [scale, position, index, setZoomLevel, setPanPosition, isDrawingEnabled, isActive]);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  const handleWheel = useCallback((e: WheelEvent) => {
     if (isDrawingEnabled && isActive) return;
     e.preventDefault();
     e.stopPropagation();
@@ -366,6 +366,15 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     const delta = -e.deltaY * zoomSensitivity;
     handleZoom(delta, e.clientX, e.clientY);
   }, [handleZoom, isDrawingEnabled, isActive]);
+
+  // Attach wheel listener manually with passive: false so preventDefault() works.
+  // React's onWheel synthetic event is passive by default in modern browsers.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isDrawingEnabled && isActive) return; // Let DrawingCanvas handle events
@@ -500,7 +509,6 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
         isActive ? 'ring-2 ring-primary shadow-lg z-10' : 'ring-1 ring-white/10 hover:ring-white/30'
       )}
       onClick={() => setActiveTileIndex(index)}
-      onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
