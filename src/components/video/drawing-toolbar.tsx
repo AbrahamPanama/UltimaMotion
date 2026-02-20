@@ -2,8 +2,9 @@
 
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Pencil, MoveUpRight, Circle, Trash2, Undo2, Minus, Square, Type, Activity, Box, Settings2, X } from 'lucide-react';
+import { Pencil, MoveUpRight, Circle, Trash2, Undo2, Minus, Square, Type, Activity, Box, Settings2, X, Layers } from 'lucide-react';
 import { useAppContext } from '@/contexts/app-context';
+import { SYNC_DRAWINGS_KEY } from '@/contexts/app-context';
 import { cn } from '@/lib/utils';
 import type { DrawingType, PoseAnalyzeScope, PoseModelVariant } from '@/types';
 import {
@@ -74,6 +75,8 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         setPoseMinPosePresenceConfidence,
         poseMinTrackingConfidence,
         setPoseMinTrackingConfidence,
+        isSyncDrawingsEnabled,
+        toggleSyncDrawings,
         is3DViewEnabled,
         toggle3DView,
     } = useAppContext();
@@ -81,7 +84,8 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
     const [isPoseSettingsOpen, setIsPoseSettingsOpen] = useState(false);
 
     const activeVideo = activeTileIndex !== null ? slots[activeTileIndex] : null;
-    const currentDrawings = activeVideo ? (drawings[activeVideo.id] || []) : [];
+    const effectiveDrawingId = isSyncDrawingsEnabled ? SYNC_DRAWINGS_KEY : (activeVideo?.id ?? '');
+    const currentDrawings = activeVideo ? (drawings[effectiveDrawingId] || []) : [];
     const hasActiveVideo = !!activeVideo;
     const hasAnyVideo = slots.some((slot) => slot !== null);
     const canEdit = isDrawingEnabled && hasActiveVideo;
@@ -89,13 +93,13 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
 
     const handleClear = () => {
         if (activeVideo) {
-            clearDrawings(activeVideo.id);
+            clearDrawings(effectiveDrawingId);
         }
     };
 
     const handleUndo = () => {
         if (!activeVideo || currentDrawings.length === 0) return;
-        setDrawingsForVideo(activeVideo.id, currentDrawings.slice(0, -1));
+        setDrawingsForVideo(effectiveDrawingId, currentDrawings.slice(0, -1));
     };
 
     const handleToggleAnnotate = () => {
@@ -145,6 +149,21 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                 >
                     <Pencil className="h-4 w-4" />
                     <span>Annotate</span>
+                </Button>
+
+                {/* Sync Drawings toggle — shown when annotate is active */}
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                        "h-10 rounded-md border border-border/70 text-foreground hover:bg-secondary disabled:opacity-50",
+                        isSyncDrawingsEnabled && "border-teal-500/40 bg-teal-500/10 text-teal-700 dark:text-teal-300"
+                    )}
+                    onClick={toggleSyncDrawings}
+                    disabled={!hasActiveVideo}
+                    title={isSyncDrawingsEnabled ? 'Disable shared drawings (tiles draw independently)' : 'Enable shared drawings (all tiles share one canvas)'}
+                >
+                    <Layers className="h-4 w-4" />
                 </Button>
 
                 <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">

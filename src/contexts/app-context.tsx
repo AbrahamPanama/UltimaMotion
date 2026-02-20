@@ -7,6 +7,8 @@ import { useToast } from "@/hooks/use-toast";
 
 const MAX_SLOTS = 4;
 
+export const SYNC_DRAWINGS_KEY = '__sync_drawings__';
+
 type Layout = 1 | 2 | 4;
 
 interface AppContextType {
@@ -58,6 +60,8 @@ interface AppContextType {
   drawings: Record<string, Drawing[]>;
   setDrawingsForVideo: (videoId: string, newDrawings: Drawing[]) => void;
   clearDrawings: (videoId: string) => void;
+  isSyncDrawingsEnabled: boolean;
+  toggleSyncDrawings: () => void;
 
   // Pose overlay state
   isPoseEnabled: boolean;
@@ -119,6 +123,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [drawingTool, setDrawingTool] = useState<DrawingType>('free');
   const [drawingColor, setDrawingColor] = useState<string>('#ef4444'); // Default red
   const [drawings, setDrawings] = useState<Record<string, Drawing[]>>({});
+  const [isSyncDrawingsEnabled, setIsSyncDrawingsEnabled] = useState(false);
 
   // Pose overlay state
   const [isPoseEnabled, setIsPoseEnabled] = useState<boolean>(false);
@@ -366,6 +371,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }));
   };
 
+  const toggleSyncDrawings = () => setIsSyncDrawingsEnabled(v => !v);
+
   const value = {
     library,
     loadLibrary,
@@ -405,6 +412,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     drawings,
     setDrawingsForVideo,
     clearDrawings,
+    isSyncDrawingsEnabled,
+    toggleSyncDrawings,
 
     // Pose overlay
     isPoseEnabled,

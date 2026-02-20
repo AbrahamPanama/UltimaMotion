@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAppContext } from '@/contexts/app-context';
+import { SYNC_DRAWINGS_KEY } from '@/contexts/app-context';
 import type { Video } from '@/types';
 import PlayerControls from './player-controls';
 import { cn } from '@/lib/utils';
@@ -50,6 +51,7 @@ export default function VideoTile({ video, index, isActive, onWorldLandmarks }: 
     drawingColor,
     drawings,
     setDrawingsForVideo,
+    isSyncDrawingsEnabled,
     // Pose overlay
     isPoseEnabled,
     poseAnalyzeScope,
@@ -85,7 +87,8 @@ export default function VideoTile({ video, index, isActive, onWorldLandmarks }: 
   const scale = zoomLevels[index] ?? 1;
   const position = panPositions[index] ?? DEFAULT_POSITION;
 
-  const currentDrawings = video ? (drawings[video.id] || []) : [];
+  const effectiveDrawingId = isSyncDrawingsEnabled ? SYNC_DRAWINGS_KEY : (video?.id ?? '');
+  const currentDrawings = video ? (drawings[effectiveDrawingId] || []) : [];
   const shouldAnalyzePose = Boolean(video) && isPoseEnabled && (poseAnalyzeScope === 'all-visible' || isActive);
 
   // Handle ref assignment and cleanup
@@ -577,7 +580,7 @@ export default function VideoTile({ video, index, isActive, onWorldLandmarks }: 
             color={drawingColor}
             isActive={isDrawingEnabled && isActive}
             drawings={currentDrawings}
-            onDrawingsChange={(newDrawings) => setDrawingsForVideo(video.id, newDrawings)}
+            onDrawingsChange={(newDrawings) => setDrawingsForVideo(effectiveDrawingId, newDrawings)}
           />
         )}
       </div>
