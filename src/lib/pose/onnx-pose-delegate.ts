@@ -283,33 +283,4 @@ export class OnnxPoseDelegate {
     }
 }
 
-// Helper to convert Float32 to Float16 bits
-function roundToFloat16Bits(val: number): number {
-    const floatView = new Float32Array(1);
-    const int32View = new Int32Array(floatView.buffer);
-    floatView[0] = val;
-    const x = int32View[0];
 
-    const sign = (x >> 16) & 0x8000;
-    let exp = (x >> 23) & 0xff;
-    let mant = x & 0x007fffff;
-
-    if (exp === 0xff) {
-        if (mant !== 0) return sign | 0x7e00 | (mant >> 13);
-        return sign | 0x7c00;
-    }
-
-    if (exp === 0) return sign;
-
-    exp -= 127;
-    if (exp > 15) return sign | 0x7c00;
-    if (exp < -14) {
-        mant |= 0x00800000;
-        const shift = -14 - exp;
-        if (shift > 24) return sign;
-        mant >>= shift;
-        return sign | (mant >> 13);
-    }
-
-    return sign | ((exp + 15) << 10) | (mant >> 13);
-}

@@ -86,6 +86,10 @@ interface AppContextType {
   setPoseUseIsolatedJointRejection: (value: boolean) => void;
   poseUseLagExtrapolation: boolean;
   setPoseUseLagExtrapolation: (value: boolean) => void;
+
+  // 3D viewer
+  is3DViewEnabled: boolean;
+  toggle3DView: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -118,8 +122,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // Pose overlay state
   const [isPoseEnabled, setIsPoseEnabled] = useState<boolean>(false);
-  const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('yolo26-small'); // Default to YOLO26 Small for best acro tracking
-  const [poseAnalyzeScope, setPoseAnalyzeScope] = useState<PoseAnalyzeScope>('active-tile');
+  const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('heavy');
+  const [poseAnalyzeScope, setPoseAnalyzeScope] = useState<PoseAnalyzeScope>('all-visible');
   const [poseMinVisibility, setPoseMinVisibility] = useState<number>(0.25);
   const [poseStability, setPoseStability] = useState<number>(0.85); // Increased default stability for less jitter out-of-the-box
   const [poseUseOneEuroFilter, setPoseUseOneEuroFilter] = useState<boolean>(true);
@@ -130,6 +134,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [poseUseExactFrameSync, setPoseUseExactFrameSync] = useState<boolean>(true);
   const [poseUseIsolatedJointRejection, setPoseUseIsolatedJointRejection] = useState<boolean>(true);
   const [poseUseLagExtrapolation, setPoseUseLagExtrapolation] = useState<boolean>(true);
+  const [is3DViewEnabled, setIs3DViewEnabled] = useState<boolean>(false);
 
   const loadLibrary = useCallback(async () => {
     try {
@@ -273,6 +278,23 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const toggleDrawing = () => setIsDrawingEnabled(prev => !prev);
   const togglePose = () => setIsPoseEnabled(prev => !prev);
 
+  const toggle3DView = () => {
+    setIs3DViewEnabled(prev => {
+      const next = !prev;
+      if (next) {
+        // Force single-slot layout and clear extra slots
+        setLayout(1);
+        setSlots(prevSlots => {
+          const newSlots = [...prevSlots];
+          for (let i = 1; i < MAX_SLOTS; i++) newSlots[i] = null;
+          return newSlots;
+        });
+        setActiveTileIndex(0);
+      }
+      return next;
+    });
+  };
+
   const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
   const clampFps = (value: number) => Math.max(5, Math.min(60, Math.round(value)));
 
@@ -410,7 +432,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     poseUseIsolatedJointRejection,
     setPoseUseIsolatedJointRejection,
     poseUseLagExtrapolation,
-    setPoseUseLagExtrapolation
+    setPoseUseLagExtrapolation,
+
+    // 3D viewer
+    is3DViewEnabled,
+    toggle3DView,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

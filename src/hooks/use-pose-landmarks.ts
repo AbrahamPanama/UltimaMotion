@@ -27,6 +27,7 @@ interface UsePoseLandmarksParams {
 interface UsePoseLandmarksResult {
   status: PoseStatus;
   poses: NormalizedLandmark[][];
+  worldPoses: NormalizedLandmark[][];
   error: string | null;
   inferenceFps: number;
   poseCount: number;
@@ -58,6 +59,7 @@ export function usePoseLandmarks({
 }: UsePoseLandmarksParams): UsePoseLandmarksResult {
   const [status, setStatus] = useState<PoseStatus>('idle');
   const [poses, setPoses] = useState<NormalizedLandmark[][]>([]);
+  const [worldPoses, setWorldPoses] = useState<NormalizedLandmark[][]>([]);
   const [error, setError] = useState<string | null>(null);
   const [inferenceFps, setInferenceFps] = useState(0);
   const [poseCount, setPoseCount] = useState(0);
@@ -87,6 +89,7 @@ export function usePoseLandmarks({
       runtimeRef.current = null;
       setStatus('idle');
       setPoses([]);
+      setWorldPoses([]);
       setError(null);
       setInferenceFps(0);
       setPoseCount(0);
@@ -172,8 +175,10 @@ export function usePoseLandmarks({
         if (cancelled) return;
         setStatus('ready');
         const detectedPoses = result?.landmarks ?? [];
+        const detectedWorldPoses = result?.worldLandmarks ?? [];
         setPoseCount(detectedPoses.length);
         setPoses(detectedPoses);
+        setWorldPoses(detectedWorldPoses);
         trackFps(now);
         setRuntimeSnapshot(runtime.getSnapshot());
       } catch (inferenceError) {
@@ -181,6 +186,7 @@ export function usePoseLandmarks({
         if (!cancelled) {
           setStatus('error');
           setPoses([]);
+          setWorldPoses([]);
           setError(formatError(inferenceError));
           setInferenceFps(0);
           setPoseCount(0);
@@ -263,6 +269,7 @@ export function usePoseLandmarks({
     () => ({
       status,
       poses,
+      worldPoses,
       error,
       inferenceFps,
       poseCount,
@@ -270,6 +277,6 @@ export function usePoseLandmarks({
       delegate: runtimeSnapshot.delegate,
       activeModel: runtimeSnapshot.modelVariant,
     }),
-    [error, inferenceFps, mediaTimeMs, poseCount, poses, runtimeSnapshot.delegate, runtimeSnapshot.modelVariant, status]
+    [error, inferenceFps, mediaTimeMs, poseCount, poses, worldPoses, runtimeSnapshot.delegate, runtimeSnapshot.modelVariant, status]
   );
 }

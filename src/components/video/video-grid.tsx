@@ -1,25 +1,34 @@
 'use client';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppContext } from '@/contexts/app-context';
 import VideoTile from './video-tile';
 import { cn } from '@/lib/utils';
-import { useEffect, useState, useRef, useCallback } from 'react';
 import PlayerControls from './player-controls';
 import type { Video } from '@/types';
+import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { useIsMobile } from '@/hooks/use-mobile';
+import Pose3DPanel from './pose-3d-panel';
 
 export default function VideoGrid() {
-    const { 
-        layout, 
-        slots, 
-        activeTileIndex, 
-        isSyncEnabled, 
+    const {
+        layout,
+        slots,
+        activeTileIndex,
+        isSyncEnabled,
         videoRefs,
         isLoopEnabled,
         syncOffsets,
         playbackRate,
+        is3DViewEnabled,
         setPlaybackRate
     } = useAppContext();
     const isMobile = useIsMobile();
+
+    const worldLandmarksRef = useRef<NormalizedLandmark[] | null>(null);
+
+    const handleWorldLandmarks = useCallback((lm: NormalizedLandmark[] | null) => {
+        worldLandmarksRef.current = lm;
+    }, []);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -51,7 +60,7 @@ export default function VideoGrid() {
     const getSyncDuration = useCallback(() => {
         const active = getActiveVideos();
         if (active.length === 0) return 0;
-        
+
         // Find the minimum duration among active clips to loop seamlessly?
         // Or maximum to play all? Let's use maximum for now, but loop based on shortest?
         // Usually sync play means play until the shortest one ends, then loop.
@@ -82,26 +91,26 @@ export default function VideoGrid() {
         // In a real sync engine we'd drive videos from a master clock. 
         // Here we just let them play and periodically re-sync if drifted?
         // For simplicity, let's just read the time of the first video.
-        
+
         const master = active[0];
         if (master) {
-             const { start } = getTrimBounds(master.slot, master.video);
-             const offset = syncOffsets[master.index] || 0;
-             const masterStart = clampToTrim(start + offset, master.slot, master.video);
-             const relativeTime = master.video.currentTime - masterStart;
-             setCurrentTime(Math.max(0, relativeTime));
-             
-             // Check for loop
-             const syncDur = getSyncDuration();
-             if (isLoopEnabled && syncDur > 0 && relativeTime >= syncDur) {
-                 // Reset all
-                 active.forEach(({ video, index, slot }) => {
-                     const { start } = getTrimBounds(slot, video);
-                     const tileOffset = syncOffsets[index] || 0;
-                     video.currentTime = clampToTrim(start + tileOffset, slot, video);
-                     video.play().catch(() => {});
-                 });
-             }
+            const { start } = getTrimBounds(master.slot, master.video);
+            const offset = syncOffsets[master.index] || 0;
+            const masterStart = clampToTrim(start + offset, master.slot, master.video);
+            const relativeTime = master.video.currentTime - masterStart;
+            setCurrentTime(Math.max(0, relativeTime));
+
+            // Check for loop
+            const syncDur = getSyncDuration();
+            if (isLoopEnabled && syncDur > 0 && relativeTime >= syncDur) {
+                // Reset all
+                active.forEach(({ video, index, slot }) => {
+                    const { start } = getTrimBounds(slot, video);
+                    const tileOffset = syncOffsets[index] || 0;
+                    video.currentTime = clampToTrim(start + tileOffset, slot, video);
+                    video.play().catch(() => { });
+                });
+            }
         }
 
         rafRef.current = requestAnimationFrame(tick);
@@ -169,34 +178,41 @@ export default function VideoGrid() {
     };
 
     return (
-        <div className="flex-1 flex flex-col gap-4 overflow-hidden h-full">
-            <div className={cn('grid gap-4 flex-1 min-h-0 auto-rows-[1fr]', gridClasses[effectiveLayout])}>
-                {slots.slice(0, effectiveLayout).map((video, index) => (
-                    <div key={index} className="min-h-0 min-w-0 overflow-hidden flex items-center justify-center">
-                        <VideoTile
-                            video={video}
-                            index={index}
-                            isActive={activeTileIndex === index}
+        <div className="flex-1 flex gap-4 overflow-hidden h-full">
+            <div className="flex-1 flex flex-col gap-4 overflow-hidden h-full">
+                <div className={cn('grid gap-4 flex-1 min-h-0 auto-rows-[1fr]', gridClasses[effectiveLayout])}>
+                    {slots.slice(0, effectiveLayout).map((video, index) => (
+                        <div key={index} className="min-h-0 min-w-0 overflow-hidden flex items-center justify-center">
+                            <VideoTile
+                                video={video}
+                                index={index}
+                                isActive={activeTileIndex === index}
+                                onWorldLandmarks={index === 0 ? handleWorldLandmarks : undefined}
+                            />
+                        </div>
+                    ))}
+                </div>
+
+                {/* Global Sync Controls Bar */}
+                {isSyncEnabled && (
+                    <div className="bg-card p-3 border rounded-lg shadow-sm mt-auto flex flex-col gap-2">
+                        <PlayerControls
+                            isPlaying={isPlaying}
+                            onPlayPause={handlePlayPause}
+                            currentTime={currentTime}
+                            duration={duration}
+                            onSeek={handleSeek}
+                            playbackRate={playbackRate}
+                            onRateChange={handleRateChange}
+                            isSyncEnabled={false}
+                            variant="static"
                         />
                     </div>
-                ))}
+                )}
             </div>
 
-            {/* Global Sync Controls Bar */}
-            {isSyncEnabled && (
-                 <div className="bg-card p-3 border rounded-lg shadow-sm mt-auto flex flex-col gap-2">
-                    <PlayerControls
-                        isPlaying={isPlaying}
-                        onPlayPause={handlePlayPause}
-                        currentTime={currentTime}
-                        duration={duration}
-                        onSeek={handleSeek}
-                        playbackRate={playbackRate}
-                        onRateChange={handleRateChange}
-                        isSyncEnabled={false} // Pass false so it renders normal controls, not the "Sync Active" badge
-                        variant="static"
-                    />
-                </div>
+            {is3DViewEnabled && (
+                <Pose3DPanel worldLandmarksRef={worldLandmarksRef} />
             )}
         </div>
     );

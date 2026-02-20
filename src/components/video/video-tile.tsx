@@ -20,11 +20,12 @@ interface VideoTileProps {
   video: Video | null;
   index: number;
   isActive: boolean;
+  onWorldLandmarks?: (landmarks: import('@mediapipe/tasks-vision').NormalizedLandmark[] | null) => void;
 }
 
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
-export default function VideoTile({ video, index, isActive }: VideoTileProps) {
+export default function VideoTile({ video, index, isActive, onWorldLandmarks }: VideoTileProps) {
   const {
     setActiveTileIndex,
     videoRefs,
@@ -564,6 +565,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
             minPoseDetectionConfidence={poseMinPoseDetectionConfidence}
             minPosePresenceConfidence={poseMinPosePresenceConfidence}
             minTrackingConfidence={poseMinTrackingConfidence}
+            onWorldLandmarks={onWorldLandmarks}
           />
         )}
 

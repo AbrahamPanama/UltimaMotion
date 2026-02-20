@@ -1,8 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Pencil, MoveUpRight, Circle, Trash2, Undo2, Minus, Square, Type, Activity } from 'lucide-react';
+import { Pencil, MoveUpRight, Circle, Trash2, Undo2, Minus, Square, Type, Activity, Box, Settings2, X } from 'lucide-react';
 import { useAppContext } from '@/contexts/app-context';
 import { cn } from '@/lib/utils';
 import type { DrawingType, PoseAnalyzeScope, PoseModelVariant } from '@/types';
@@ -73,8 +73,12 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         poseMinPosePresenceConfidence,
         setPoseMinPosePresenceConfidence,
         poseMinTrackingConfidence,
-        setPoseMinTrackingConfidence
+        setPoseMinTrackingConfidence,
+        is3DViewEnabled,
+        toggle3DView,
     } = useAppContext();
+
+    const [isPoseSettingsOpen, setIsPoseSettingsOpen] = useState(false);
 
     const activeVideo = activeTileIndex !== null ? slots[activeTileIndex] : null;
     const currentDrawings = activeVideo ? (drawings[activeVideo.id] || []) : [];
@@ -110,6 +114,11 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
     const handleTogglePose = () => {
         if (!canPose) return;
         togglePose();
+    };
+
+    const handleToggle3DView = () => {
+        if (!canPose || isYoloModel) return;
+        toggle3DView();
     };
 
     const isYoloModel = poseModelVariant.startsWith('yolo');
@@ -254,7 +263,8 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
+                {/* Color picker */}
                 <Popover>
                     <PopoverTrigger asChild>
                         <Button
@@ -285,6 +295,7 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                     </PopoverContent>
                 </Popover>
 
+                {/* Pose toggle */}
                 <Button
                     variant="ghost"
                     className={cn(
@@ -301,6 +312,146 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                     <span className="text-sm font-medium">Pose</span>
                 </Button>
 
+                {/* Pose settings gear — only when pose is on */}
+                <Popover open={isPoseSettingsOpen} onOpenChange={setIsPoseSettingsOpen}>
+                    <PopoverTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                                "h-10 rounded-md border border-border/70 text-foreground hover:bg-secondary disabled:opacity-50",
+                                isPoseSettingsOpen && "bg-secondary",
+                                !isPoseEnabled && "opacity-40"
+                            )}
+                            disabled={!isPoseEnabled}
+                            title="Pose settings"
+                        >
+                            <Settings2 className="h-4 w-4" />
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                        className="w-80 p-0 overflow-hidden"
+                        align="start"
+                        side="top"
+                        sideOffset={8}
+                    >
+                        {/* Header */}
+                        <div className="flex items-center justify-between border-b border-border/70 px-3 py-2.5 bg-secondary/40">
+                            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Pose Settings</p>
+                            <button
+                                onClick={() => setIsPoseSettingsOpen(false)}
+                                className="text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                                <X className="h-3.5 w-3.5" />
+                            </button>
+                        </div>
+
+                        <div className="p-3 space-y-3 max-h-[70vh] overflow-y-auto">
+                            {/* Model + Scope */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-1.5">
+                                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Model</p>
+                                    <Select value={poseModelVariant} onValueChange={(v) => setPoseModelVariant(v as PoseModelVariant)}>
+                                        <SelectTrigger className="h-8 text-xs">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="yolo26-nano">YOLO26 Nano</SelectItem>
+                                            <SelectItem value="yolo26-small">YOLO26 Small</SelectItem>
+                                            <SelectItem value="lite">MP Lite</SelectItem>
+                                            <SelectItem value="full">MP Full</SelectItem>
+                                            <SelectItem value="heavy">MP Heavy</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Scope</p>
+                                    <Select value={poseAnalyzeScope} onValueChange={(v) => setPoseAnalyzeScope(v as PoseAnalyzeScope)}>
+                                        <SelectTrigger className="h-8 text-xs">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="active-tile">Active tile</SelectItem>
+                                            <SelectItem value="all-visible">All tiles</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            {/* Inference FPS slider */}
+                            <div className="space-y-1.5">
+                                <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                                    <span>Inference FPS</span>
+                                    <span>{poseTargetFps}</span>
+                                </div>
+                                <Slider value={[poseTargetFps]} min={5} max={60} step={1} onValueChange={([v]) => setPoseTargetFps(v)} />
+                            </div>
+
+                            {/* MediaPipe-only settings */}
+                            {!isYoloModel && (
+                                <>
+                                    <div className="border-t border-border/50 pt-2 space-y-1.5">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Confidence</p>
+                                        <div className="space-y-2">
+                                            {[
+                                                { label: 'Detection', value: poseMinPoseDetectionConfidence, set: setPoseMinPoseDetectionConfidence },
+                                                { label: 'Presence', value: poseMinPosePresenceConfidence, set: setPoseMinPosePresenceConfidence },
+                                                { label: 'Tracking', value: poseMinTrackingConfidence, set: setPoseMinTrackingConfidence },
+                                                { label: 'Min Visibility', value: poseMinVisibility, set: setPoseMinVisibility },
+                                                { label: 'Stability', value: poseStability, set: setPoseStability },
+                                            ].map(({ label, value, set }) => (
+                                                <div key={label} className="space-y-1">
+                                                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                                        <span>{label}</span>
+                                                        <span>{value.toFixed(2)}</span>
+                                                    </div>
+                                                    <Slider value={[value]} min={0} max={1} step={0.05} onValueChange={([v]) => set(v)} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="border-t border-border/50 pt-2 space-y-1.5">
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Filters</p>
+                                        {[
+                                            { label: 'One Euro Filter', desc: 'Confidence-aware anti-jitter smoothing', value: poseUseOneEuroFilter, set: setPoseUseOneEuroFilter },
+                                            { label: 'Exact Frame Sync', desc: 'Prevents duplicate frames', value: poseUseExactFrameSync, set: setPoseUseExactFrameSync },
+                                            { label: 'Isolated Joint Rejection', desc: 'Prevents single-joint glitch resets', value: poseUseIsolatedJointRejection, set: setPoseUseIsolatedJointRejection },
+                                            { label: 'Lag Extrapolation', desc: 'Predicts forward to hide latency', value: poseUseLagExtrapolation, set: setPoseUseLagExtrapolation },
+                                        ].map(({ label, desc, value, set }) => (
+                                            <div key={label} className="flex items-center justify-between rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1.5">
+                                                <div>
+                                                    <p className="text-[11px] font-medium text-foreground">{label}</p>
+                                                    <p className="text-[10px] text-muted-foreground/80">{desc}</p>
+                                                </div>
+                                                <Switch checked={value} onCheckedChange={set} />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </PopoverContent>
+                </Popover>
+
+                {/* 3D View */}
+                <Button
+                    variant="ghost"
+                    className={cn(
+                        "h-10 justify-center gap-2 rounded-md border text-foreground hover:bg-secondary disabled:opacity-50",
+                        is3DViewEnabled
+                            ? "border-teal-500/40 bg-teal-500/10 text-teal-700 dark:text-teal-300 hover:bg-teal-500/15"
+                            : "border-border/70",
+                    )}
+                    onClick={handleToggle3DView}
+                    disabled={!canPose || isYoloModel}
+                    title={isYoloModel ? '3D View requires a MediaPipe model' : (is3DViewEnabled ? 'Disable 3D viewer' : 'Enable 3D viewer')}
+                >
+                    <Box className={cn("h-4 w-4", is3DViewEnabled && "animate-pulse")} />
+                    <span className="text-sm font-medium">3D View</span>
+                </Button>
+
+                {/* Undo + Clear */}
                 <Button
                     variant="ghost"
                     className="h-10 justify-center gap-2 rounded-md border border-border/70 text-foreground hover:bg-secondary disabled:opacity-50"
@@ -323,190 +474,6 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                     <span className="text-sm font-medium">Clear</span>
                 </Button>
             </div>
-
-            {isPoseEnabled && (
-                <div className={cn(
-                    "rounded-md border border-teal-500/25 bg-teal-500/5 p-2",
-                    !canPose && "opacity-60"
-                )}>
-                    <div className="grid gap-3 md:grid-cols-2">
-                        {!isYoloModel && (
-                            <>
-                                <div className="flex items-center justify-between rounded-md border border-border/60 bg-background/60 px-3 py-2 md:col-span-2">
-                                    <div className="space-y-0.5">
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">One Euro Filter</p>
-                                        <p className="text-[11px] text-muted-foreground/80">Confidence-aware anti-jitter smoothing</p>
-                                    </div>
-                                    <Switch
-                                        checked={poseUseOneEuroFilter}
-                                        onCheckedChange={setPoseUseOneEuroFilter}
-                                        aria-label="Toggle One Euro pose filter"
-                                    />
-                                </div>
-
-                                <div className="flex items-center justify-between rounded-md border border-border/60 bg-background/60 px-3 py-2 md:col-span-2">
-                                    <div className="space-y-0.5">
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Exact Frame Sync</p>
-                                        <p className="text-[11px] text-muted-foreground/80">Prevents duplicate frames using native metadata</p>
-                                    </div>
-                                    <Switch
-                                        checked={poseUseExactFrameSync}
-                                        onCheckedChange={setPoseUseExactFrameSync}
-                                        aria-label="Toggle exact frame sync"
-                                    />
-                                </div>
-
-                                <div className="flex items-center justify-between rounded-md border border-border/60 bg-background/60 px-3 py-2 md:col-span-2">
-                                    <div className="space-y-0.5">
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Isolated Joint Rejection</p>
-                                        <p className="text-[11px] text-muted-foreground/80">Prevents single-joint glitch from resetting full body</p>
-                                    </div>
-                                    <Switch
-                                        checked={poseUseIsolatedJointRejection}
-                                        onCheckedChange={setPoseUseIsolatedJointRejection}
-                                        aria-label="Toggle isolated joint rejection"
-                                    />
-                                </div>
-
-                                <div className="flex items-center justify-between rounded-md border border-border/60 bg-background/60 px-3 py-2 md:col-span-2">
-                                    <div className="space-y-0.5">
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Lag Extrapolation</p>
-                                        <p className="text-[11px] text-muted-foreground/80">Predicts forward motion to hide compute delay</p>
-                                    </div>
-                                    <Switch
-                                        checked={poseUseLagExtrapolation}
-                                        onCheckedChange={setPoseUseLagExtrapolation}
-                                        aria-label="Toggle predictive lag extrapolation"
-                                    />
-                                </div>
-                            </>
-                        )}
-
-                        <div className="space-y-2">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Model</p>
-                            <Select
-                                value={poseModelVariant}
-                                onValueChange={(value) => setPoseModelVariant(value as PoseModelVariant)}
-                            >
-                                <SelectTrigger className="h-9">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="yolo26-nano">YOLO26 Nano (Fastest)</SelectItem>
-                                    <SelectItem value="yolo26-small">YOLO26 Small (Best for Acro)</SelectItem>
-                                    <SelectItem value="lite">MediaPipe Lite (Legacy)</SelectItem>
-                                    <SelectItem value="full">MediaPipe Full (Legacy)</SelectItem>
-                                    <SelectItem value="heavy">MediaPipe Heavy (Legacy)</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Scope</p>
-                            <Select
-                                value={poseAnalyzeScope}
-                                onValueChange={(value) => setPoseAnalyzeScope(value as PoseAnalyzeScope)}
-                            >
-                                <SelectTrigger className="h-9">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="active-tile">Active tile only</SelectItem>
-                                    <SelectItem value="all-visible">All visible tiles</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                <span>Inference FPS</span>
-                                <span>{poseTargetFps}</span>
-                            </div>
-                            <Slider
-                                value={[poseTargetFps]}
-                                min={5}
-                                max={60}
-                                step={1}
-                                onValueChange={(value) => setPoseTargetFps(value[0])}
-                            />
-                        </div>
-
-                        {!isYoloModel && (
-                            <>
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                        <span>Min Visibility</span>
-                                        <span>{poseMinVisibility.toFixed(2)}</span>
-                                    </div>
-                                    <Slider
-                                        value={[poseMinVisibility]}
-                                        min={0}
-                                        max={1}
-                                        step={0.05}
-                                        onValueChange={(value) => setPoseMinVisibility(value[0])}
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                        <span>Stability</span>
-                                        <span>{poseStability.toFixed(2)}</span>
-                                    </div>
-                                    <Slider
-                                        value={[poseStability]}
-                                        min={0}
-                                        max={1}
-                                        step={0.05}
-                                        onValueChange={(value) => setPoseStability(value[0])}
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                        <span>Detection Conf.</span>
-                                        <span>{poseMinPoseDetectionConfidence.toFixed(2)}</span>
-                                    </div>
-                                    <Slider
-                                        value={[poseMinPoseDetectionConfidence]}
-                                        min={0}
-                                        max={1}
-                                        step={0.05}
-                                        onValueChange={(value) => setPoseMinPoseDetectionConfidence(value[0])}
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                        <span>Presence Conf.</span>
-                                        <span>{poseMinPosePresenceConfidence.toFixed(2)}</span>
-                                    </div>
-                                    <Slider
-                                        value={[poseMinPosePresenceConfidence]}
-                                        min={0}
-                                        max={1}
-                                        step={0.05}
-                                        onValueChange={(value) => setPoseMinPosePresenceConfidence(value[0])}
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                        <span>Tracking Conf.</span>
-                                        <span>{poseMinTrackingConfidence.toFixed(2)}</span>
-                                    </div>
-                                    <Slider
-                                        value={[poseMinTrackingConfidence]}
-                                        min={0}
-                                        max={1}
-                                        step={0.05}
-                                        onValueChange={(value) => setPoseMinTrackingConfidence(value[0])}
-                                    />
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

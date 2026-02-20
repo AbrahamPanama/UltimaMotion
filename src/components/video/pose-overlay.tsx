@@ -25,6 +25,7 @@ const POSE_CONNECTIONS: Array<[number, number]> = [
   [27, 31], [28, 32],
 ];
 
+
 interface PoseOverlayProps {
   enabled: boolean;
   videoElement: HTMLVideoElement | null;
@@ -42,6 +43,7 @@ interface PoseOverlayProps {
   minPoseDetectionConfidence: number;
   minPosePresenceConfidence: number;
   minTrackingConfidence: number;
+  onWorldLandmarks?: (landmarks: NormalizedLandmark[] | null) => void;
 }
 
 interface ProjectedPoint {
@@ -388,6 +390,7 @@ export default function PoseOverlay({
   minPoseDetectionConfidence,
   minPosePresenceConfidence,
   minTrackingConfidence,
+  onWorldLandmarks,
 }: PoseOverlayProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const lockAnchorRef = useRef<{ x: number; y: number } | null>(null);
@@ -402,7 +405,7 @@ export default function PoseOverlay({
   const [isSelectingTarget, setIsSelectingTarget] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
 
-  const { status, poses, error, inferenceFps, poseCount, mediaTimeMs, delegate, activeModel } = usePoseLandmarks({
+  const { status, poses, worldPoses, error, inferenceFps, poseCount, mediaTimeMs, delegate, activeModel } = usePoseLandmarks({
     enabled,
     videoElement,
     modelVariant,
@@ -412,6 +415,17 @@ export default function PoseOverlay({
     minPosePresenceConfidence,
     minTrackingConfidence,
   });
+
+  // Fire onWorldLandmarks whenever the selected person's world landmarks change
+  useEffect(() => {
+    if (!onWorldLandmarks) return;
+    if (!enabled || !worldPoses || worldPoses.length === 0) {
+      onWorldLandmarks(null);
+      return;
+    }
+    onWorldLandmarks(worldPoses[0] ?? null);
+  }, [enabled, worldPoses, onWorldLandmarks]);
+
 
   const projectedPoses = useMemo<ProjectedPoint[][]>(() => {
     if (!poses || poses.length === 0) return [];
@@ -672,6 +686,7 @@ export default function PoseOverlay({
             </g>
           );
         })}
+
 
         {selectedBox && (
           <rect
