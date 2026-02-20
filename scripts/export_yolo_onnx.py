@@ -26,8 +26,17 @@ def export_models():
             # - imgsz=640 is standard
             # - format='onnx'
             # - simplify=True helps remove redundant nodes, better for ONNX Runtime Web
-            # - dynamic=False (fixed size is usually better for WebGL/WebGPU backend)
-            exported_path = model.export(format="onnx", imgsz=640, simplify=True)
+            # - dynamic=False (CRITICAL: WebGPU handles dynamic shapes terribly; this must be False)
+            # - half=True (HIGHLY RECOMMENDED: Export in FP16 for Apple Silicon)
+            # - opset=12 (Opset 12 or 17 has the best WebGPU operator coverage)
+            exported_path = model.export(
+                format="onnx", 
+                imgsz=640, 
+                simplify=True,
+                dynamic=False,
+                half=True,
+                opset=12
+            )
             
             # Move the exported .onnx file to the target directory
             onnx_filename = model_name.replace(".pt", ".onnx")
