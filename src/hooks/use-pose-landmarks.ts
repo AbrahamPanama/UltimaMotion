@@ -10,6 +10,12 @@ import {
   type PoseRuntimeConfig,
   type PoseRuntimeSnapshot,
 } from '@/lib/pose/pose-runtime';
+import {
+  createOneEuroScalarState,
+  updateOneEuroScalar,
+  type OneEuroFilterParams,
+  type OneEuroScalarState,
+} from '@/lib/pose/one-euro-filter';
 
 type PoseStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -42,6 +48,52 @@ type VideoWithFrameCallback = HTMLVideoElement & {
   cancelVideoFrameCallback?: (handle: number) => void;
 };
 
+// ── 1€ Filter params (expert-recommended for normalized [0,1] coordinates) ──
+const ONE_EURO_PARAMS: OneEuroFilterParams = {
+  minCutoff: 1.0,
+  beta: 0.01,
+  derivativeCutoff: 1.0,
+};
+
+interface LandmarkFilterState {
+  xFilter: OneEuroScalarState;
+  yFilter: OneEuroScalarState;
+  zFilter: OneEuroScalarState;
+  visFilter: OneEuroScalarState;
+}
+
+const createLandmarkFilterState = (): LandmarkFilterState => ({
+  xFilter: createOneEuroScalarState(),
+  yFilter: createOneEuroScalarState(),
+  zFilter: createOneEuroScalarState(),
+  visFilter: createOneEuroScalarState(),
+});
+
+/**
+ * Apply the 1€ filter to a single pose's normalized landmarks.
+ * Mutates filterStates in place for efficiency.
+ */
+const smoothNormalizedPose = (
+  raw: NormalizedLandmark[],
+  filterStates: LandmarkFilterState[],
+  dtMs: number,
+): NormalizedLandmark[] => {
+  // Ensure filterStates array matches pose length
+  while (filterStates.length < raw.length) {
+    filterStates.push(createLandmarkFilterState());
+  }
+
+  return raw.map((lm, i) => {
+    const state = filterStates[i];
+    return {
+      x: updateOneEuroScalar(state.xFilter, lm.x, dtMs, ONE_EURO_PARAMS),
+      y: updateOneEuroScalar(state.yFilter, lm.y, dtMs, ONE_EURO_PARAMS),
+      z: updateOneEuroScalar(state.zFilter, lm.z ?? 0, dtMs, ONE_EURO_PARAMS),
+      visibility: updateOneEuroScalar(state.visFilter, lm.visibility ?? 1, dtMs, ONE_EURO_PARAMS),
+    };
+  });
+};
+
 const formatError = (error: unknown) => {
   if (error instanceof Error) return error.message;
   return 'Pose inference failed.';
@@ -71,10 +123,14 @@ export function usePoseLandmarks({
 
   const isBusyRef = useRef(false);
   const lastInferenceTimeRef = useRef(0);
-  const lastSubmittedTimestampMsRef = useRef(0);
   const fpsWindowStartRef = useRef(0);
   const fpsWindowFrameCountRef = useRef(0);
   const runtimeRef = useRef<PoseRuntime | null>(null);
+
+  // ── Smoothing state (lives here, NOT in render) ──
+  const filterStatesRef = useRef<LandmarkFilterState[]>([]);
+  const lastMediaTimeMsRef = useRef(-1);
+  const monotonicTimeMsRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -94,13 +150,18 @@ export function usePoseLandmarks({
       setInferenceFps(0);
       setPoseCount(0);
       setMediaTimeMs(0);
-      lastSubmittedTimestampMsRef.current = 0;
+      // Reset smoothing
+      filterStatesRef.current = [];
+      lastMediaTimeMsRef.current = -1;
+      monotonicTimeMsRef.current = 0;
       return;
     }
 
     if (!runtimeRef.current) {
       runtimeRef.current = createPoseRuntime();
-      lastSubmittedTimestampMsRef.current = 0;
+      filterStatesRef.current = [];
+      lastMediaTimeMsRef.current = -1;
+      monotonicTimeMsRef.current = 0;
     }
 
     const runtime = runtimeRef.current;
@@ -119,6 +180,7 @@ export function usePoseLandmarks({
 
     const targetInterval = 1000 / Math.max(1, targetFps);
     const videoWithCallback = videoElement as VideoWithFrameCallback;
+    const isYoloModel = modelVariant.startsWith('yolo');
 
     setStatus('loading');
     setError(null);
@@ -155,17 +217,34 @@ export function usePoseLandmarks({
         }
       }
 
-      const mediaTimeMs = useExactFrameSync && metadata
+      // ── Compute media time (precise, not batched through React state) ──
+      const currentMediaTimeMs = useExactFrameSync && metadata
         ? Math.floor(metadata.mediaTime * 1000)
         : Number.isFinite(videoElement.currentTime)
           ? Math.floor(videoElement.currentTime * 1000)
           : Math.floor(now);
 
-      setMediaTimeMs(mediaTimeMs);
-      const candidateTs = mediaTimeMs;
-      const previousTs = lastSubmittedTimestampMsRef.current;
-      const timestampMs = candidateTs > previousTs ? candidateTs : previousTs + 1;
-      lastSubmittedTimestampMsRef.current = timestampMs;
+      // ── Compute dtMs for the 1€ filter ──
+      let dtMs = lastMediaTimeMsRef.current >= 0
+        ? currentMediaTimeMs - lastMediaTimeMsRef.current
+        : 33; // reasonable default for first frame (~30fps)
+
+      // Detect loop or seek (backwards jump or huge forward gap)
+      const isLoopOrSeek = dtMs < 0 || dtMs > 1000;
+
+      if (isLoopOrSeek) {
+        dtMs = 33; // fallback
+        runtime.resetTracker(); // flush MediaPipe's internal optical flow
+        filterStatesRef.current = []; // flush 1€ filter history
+      }
+
+      lastMediaTimeMsRef.current = currentMediaTimeMs;
+
+      // ── Build monotonic timestamp for MediaPipe ──
+      monotonicTimeMsRef.current += Math.max(1, dtMs);
+      const timestampMs = monotonicTimeMsRef.current;
+
+      setMediaTimeMs(currentMediaTimeMs);
 
       isBusyRef.current = true;
       lastInferenceTimeRef.current = now;
@@ -177,7 +256,22 @@ export function usePoseLandmarks({
         const detectedPoses = result?.landmarks ?? [];
         const detectedWorldPoses = result?.worldLandmarks ?? [];
         setPoseCount(detectedPoses.length);
-        setPoses(detectedPoses);
+
+        // ── Apply 1€ smoothing on normalized coords (skip for YOLO) ──
+        if (!isYoloModel && detectedPoses.length > 0 && dtMs > 0) {
+          const smoothedPoses = detectedPoses.map((pose, poseIdx) => {
+            // For simplicity, we only smooth the first pose with a shared filter state.
+            // Multi-person smoothing would need per-tracked-person state.
+            if (poseIdx === 0) {
+              return smoothNormalizedPose(pose, filterStatesRef.current, dtMs);
+            }
+            return pose;
+          });
+          setPoses(smoothedPoses);
+        } else {
+          setPoses(detectedPoses);
+        }
+
         setWorldPoses(detectedWorldPoses);
         trackFps(now);
         setRuntimeSnapshot(runtime.getSnapshot());
@@ -221,7 +315,13 @@ export function usePoseLandmarks({
       }
     };
 
-    const onSeeked = () => runImmediate();
+    const onSeeked = () => {
+      // Reset smoothing on seek — user jumped to a different point
+      runtime.resetTracker();
+      filterStatesRef.current = [];
+      lastMediaTimeMsRef.current = -1;
+      runImmediate();
+    };
     const onPause = () => runImmediate();
     const onPlay = () => runImmediate();
     const onLoadedData = () => runImmediate();

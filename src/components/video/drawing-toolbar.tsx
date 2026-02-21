@@ -57,16 +57,16 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         setPoseAnalyzeScope,
         poseMinVisibility,
         setPoseMinVisibility,
-        poseStability,
-        setPoseStability,
-        poseUseOneEuroFilter,
-        setPoseUseOneEuroFilter,
         poseUseExactFrameSync,
         setPoseUseExactFrameSync,
-        poseUseIsolatedJointRejection,
-        setPoseUseIsolatedJointRejection,
-        poseUseLagExtrapolation,
-        setPoseUseLagExtrapolation,
+        poseShowCoG,
+        setPoseShowCoG,
+        poseShowJointAngles,
+        setPoseShowJointAngles,
+        poseShowBodyLean,
+        setPoseShowBodyLean,
+        poseShowJumpHeight,
+        setPoseShowJumpHeight,
         poseTargetFps,
         setPoseTargetFps,
         poseMinPoseDetectionConfidence,
@@ -417,7 +417,6 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                                 { label: 'Presence', value: poseMinPosePresenceConfidence, set: setPoseMinPosePresenceConfidence },
                                                 { label: 'Tracking', value: poseMinTrackingConfidence, set: setPoseMinTrackingConfidence },
                                                 { label: 'Min Visibility', value: poseMinVisibility, set: setPoseMinVisibility },
-                                                { label: 'Stability', value: poseStability, set: setPoseStability },
                                             ].map(({ label, value, set }) => (
                                                 <div key={label} className="space-y-1">
                                                     <div className="flex items-center justify-between text-[11px] text-muted-foreground">
@@ -433,10 +432,11 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                     <div className="border-t border-border/50 pt-2 space-y-1.5">
                                         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Filters</p>
                                         {[
-                                            { label: 'One Euro Filter', desc: 'Confidence-aware anti-jitter smoothing', value: poseUseOneEuroFilter, set: setPoseUseOneEuroFilter },
                                             { label: 'Exact Frame Sync', desc: 'Prevents duplicate frames', value: poseUseExactFrameSync, set: setPoseUseExactFrameSync },
-                                            { label: 'Isolated Joint Rejection', desc: 'Prevents single-joint glitch resets', value: poseUseIsolatedJointRejection, set: setPoseUseIsolatedJointRejection },
-                                            { label: 'Lag Extrapolation', desc: 'Predicts forward to hide latency', value: poseUseLagExtrapolation, set: setPoseUseLagExtrapolation },
+                                            { label: 'Center of Gravity', desc: 'Segment-weighted body mass center', value: poseShowCoG, set: setPoseShowCoG },
+                                            { label: 'Joint Angles', desc: 'Knee, hip & elbow angle arcs', value: poseShowJointAngles, set: setPoseShowJointAngles },
+                                            { label: 'Body Lean', desc: 'Torso tilt from vertical', value: poseShowBodyLean, set: setPoseShowBodyLean },
+                                            { label: 'Jump Height', desc: 'Vertical displacement from baseline', value: poseShowJumpHeight, set: setPoseShowJumpHeight },
                                         ].map(({ label, desc, value, set }) => (
                                             <div key={label} className="flex items-center justify-between rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1.5">
                                                 <div>

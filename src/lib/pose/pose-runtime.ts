@@ -45,6 +45,8 @@ export class PoseRuntime {
   private appliedOptionsKey = '';
   private initPromise: Promise<void> | null = null;
   private onnxDelegate: OnnxPoseDelegate | null = null;
+  private lastTimestampMs = -1;
+  private needsTrackerReset = false;
 
   private async getVisionLib() {
     if (!this.visionLib) {
@@ -173,6 +175,15 @@ export class PoseRuntime {
     }
   }
 
+  /**
+   * Force MediaPipe to re-initialize its internal tracker on the next call.
+   * Call this when the video loops or the user seeks to a different time.
+   */
+  resetTracker() {
+    this.needsTrackerReset = true;
+    this.lastTimestampMs = -1;
+  }
+
   async detectForVideo(
     videoFrame: TexImageSource,
     timestampMs: number,
@@ -184,8 +195,22 @@ export class PoseRuntime {
       return this.onnxDelegate.detect(videoFrame as HTMLVideoElement);
     }
 
+    // Detect backwards time jumps (loop/seek) and force tracker reset
+    if (this.lastTimestampMs >= 0 && timestampMs <= this.lastTimestampMs) {
+      this.needsTrackerReset = true;
+    }
+
+    if (this.needsTrackerReset) {
+      // Force a full model reload to flush MediaPipe's internal optical flow
+      this.landmarker?.close();
+      this.landmarker = null;
+      this.appliedOptionsKey = '';
+      this.needsTrackerReset = false;
+    }
+
     await this.ensureReady(config);
     if (!this.landmarker) return null;
+    this.lastTimestampMs = timestampMs;
     return this.landmarker.detectForVideo(videoFrame, timestampMs);
   }
 
@@ -204,6 +229,8 @@ export class PoseRuntime {
     this.appliedOptionsKey = '';
     this.modelVariant = null;
     this.delegate = null;
+    this.lastTimestampMs = -1;
+    this.needsTrackerReset = false;
   }
 }
 

@@ -57,12 +57,12 @@ export default function VideoTile({ video, index, isActive, onWorldLandmarks }: 
     poseAnalyzeScope,
     poseModelVariant,
     poseMinVisibility,
-    poseStability,
-    poseUseOneEuroFilter,
     poseTargetFps,
     poseUseExactFrameSync,
-    poseUseIsolatedJointRejection,
-    poseUseLagExtrapolation,
+    poseShowCoG,
+    poseShowJointAngles,
+    poseShowBodyLean,
+    poseShowJumpHeight,
     poseMinPoseDetectionConfidence,
     poseMinPosePresenceConfidence,
     poseMinTrackingConfidence
@@ -561,10 +561,10 @@ export default function VideoTile({ video, index, isActive, onWorldLandmarks }: 
             targetFps={poseTargetFps}
             useExactFrameSync={poseUseExactFrameSync}
             minVisibility={poseMinVisibility}
-            stability={poseStability}
-            useOneEuroFilter={poseUseOneEuroFilter}
-            useIsolatedJointRejection={poseUseIsolatedJointRejection}
-            useLagExtrapolation={poseUseLagExtrapolation}
+            showCoG={poseShowCoG}
+            showJointAngles={poseShowJointAngles}
+            showBodyLean={poseShowBodyLean}
+            showJumpHeight={poseShowJumpHeight}
             minPoseDetectionConfidence={poseMinPoseDetectionConfidence}
             minPosePresenceConfidence={poseMinPosePresenceConfidence}
             minTrackingConfidence={poseMinTrackingConfidence}

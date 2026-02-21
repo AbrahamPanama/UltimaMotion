@@ -1,16 +1,19 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 import type { PoseModelVariant } from '@/types';
 import { cn } from '@/lib/utils';
 import { usePoseLandmarks } from '@/hooks/use-pose-landmarks';
 import {
-  createOneEuroScalarState,
-  updateOneEuroScalar,
-  type OneEuroFilterParams,
-  type OneEuroScalarState,
-} from '@/lib/pose/one-euro-filter';
+  computeCoG,
+  computeJointAngles,
+  computeBodyLean,
+  updateJumpHeight,
+  createJumpHeightState,
+  type JointAngle,
+  type JumpHeightState,
+} from '@/lib/pose/biomechanics';
 
 const POSE_CONNECTIONS: Array<[number, number]> = [
   [0, 1], [1, 2], [2, 3], [3, 7],
@@ -36,10 +39,10 @@ interface PoseOverlayProps {
   targetFps: number;
   useExactFrameSync: boolean;
   minVisibility: number;
-  stability: number;
-  useOneEuroFilter: boolean;
-  useIsolatedJointRejection: boolean;
-  useLagExtrapolation: boolean;
+  showCoG: boolean;
+  showJointAngles: boolean;
+  showBodyLean: boolean;
+  showJumpHeight: boolean;
   minPoseDetectionConfidence: number;
   minPosePresenceConfidence: number;
   minTrackingConfidence: number;
@@ -61,33 +64,7 @@ interface PoseBox {
   center: { x: number; y: number };
 }
 
-interface OneEuroLandmarkState {
-  xFilter: OneEuroScalarState;
-  yFilter: OneEuroScalarState;
-  visibility: number;
-  holdFrames: number;
-}
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
-const lerp = (from: number, to: number, alpha: number) => from + ((to - from) * alpha);
-const SMOOTHING_BASE_ALPHA = 0.24;
-const SMOOTHING_MAX_ALPHA = 0.82;
-const SMOOTHING_MIN_ALPHA = 0.06;
-const SMOOTHING_VISIBILITY_WEIGHT = 0.5;
-const SMOOTHING_RESET_DISTANCE_MIN_RATIO = 0.16;
-const SMOOTHING_RESET_DISTANCE_MAX_RATIO = 0.28;
-const SMOOTHING_MIN_DT_MS = 8;
-const SMOOTHING_MAX_DT_MS = 120;
-const ONE_EURO_MIN_CUTOFF_FAST = 3.2;
-const ONE_EURO_MIN_CUTOFF_STABLE = 0.05; // Dropped from 0.55 for aggressive smoothing at low speeds
-const ONE_EURO_BETA_FAST = 0.85;
-const ONE_EURO_BETA_STABLE = 0.3; // Increased to 0.3 to reduce lag during sudden movements
-const ONE_EURO_DERIVATIVE_CUTOFF_FAST = 2.4;
-const ONE_EURO_DERIVATIVE_CUTOFF_STABLE = 1.2;
-const ONE_EURO_LOW_CONFIDENCE_BASE = 0.14;
-const ONE_EURO_HOLD_FRAMES_MIN = 1;
-const ONE_EURO_HOLD_FRAMES_MAX = 8;
 
 const normalizeLandmarks = (
   landmarks: NormalizedLandmark[],
@@ -99,18 +76,6 @@ const normalizeLandmarks = (
     y: clamp01(Number.isFinite(landmark.y) ? landmark.y : 0.5) * sourceHeight,
     visibility: clamp01(Number.isFinite(landmark.visibility) ? landmark.visibility : 1),
   }));
-
-const getPoseCenter = (pose: ProjectedPoint[]) => {
-  const candidates = pose.filter((point) => point.visibility >= 0.1);
-  const points = candidates.length > 0 ? candidates : pose;
-  if (points.length === 0) return null;
-
-  const sum = points.reduce(
-    (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
-    { x: 0, y: 0 }
-  );
-  return { x: sum.x / points.length, y: sum.y / points.length };
-};
 
 const getPoseBoundingArea = (pose: ProjectedPoint[]) => {
   const points = pose.filter((point) => point.visibility >= 0.1);
@@ -155,35 +120,6 @@ const getPoseBox = (pose: ProjectedPoint[], sourceWidth: number, sourceHeight: n
   };
 };
 
-const getDistanceSq = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy;
-};
-
-const getNearestPoseIndex = (poses: ProjectedPoint[][], target: { x: number; y: number }) => {
-  let bestIndex = 0;
-  let bestDistance = Number.POSITIVE_INFINITY;
-
-  poses.forEach((pose, index) => {
-    const center = getPoseCenter(pose);
-    if (!center) return;
-    const distance = getDistanceSq(center, target);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestIndex = index;
-    }
-  });
-
-  return bestIndex;
-};
-
-const isPointInBox = (point: { x: number; y: number }, box: PoseBox) =>
-  point.x >= box.x &&
-  point.x <= box.x + box.width &&
-  point.y >= box.y &&
-  point.y <= box.y + box.height;
-
 const getAutoPoseIndex = (poses: ProjectedPoint[][]) => {
   if (poses.length === 0) return -1;
 
@@ -203,174 +139,33 @@ const getAutoPoseIndex = (poses: ProjectedPoint[][]) => {
   return bestIndex;
 };
 
-const smoothSelectedPose = (
-  nextPose: ProjectedPoint[],
-  previousPose: ProjectedPoint[] | null,
-  dtMs: number,
-  sourceWidth: number,
-  sourceHeight: number,
-  stability: number
-) => {
-  if (!previousPose || previousPose.length !== nextPose.length) {
-    return nextPose;
-  }
+// ── SVG Arc helper for joint angles ──
 
-  const normalizedStability = clamp01(stability);
-  const boundedDtMs = clamp(dtMs, SMOOTHING_MIN_DT_MS, SMOOTHING_MAX_DT_MS);
-  const sourceDiagonal = Math.hypot(sourceWidth, sourceHeight);
-  const resetDistanceRatio = SMOOTHING_RESET_DISTANCE_MAX_RATIO
-    - ((SMOOTHING_RESET_DISTANCE_MAX_RATIO - SMOOTHING_RESET_DISTANCE_MIN_RATIO) * normalizedStability);
-  const resetDistance = sourceDiagonal * resetDistanceRatio;
-
-  const hasLargeJump = nextPose.some((point, index) => {
-    const previousPoint = previousPose[index];
-    if (!previousPoint) return true;
-    return Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y) > resetDistance;
-  });
-
-  if (hasLargeJump) {
-    return nextPose;
-  }
-
-  return nextPose.map((point, index) => {
-    const previousPoint = previousPose[index];
-    if (!previousPoint) return point;
-
-    const distance = Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y);
-    const speedPxPerMs = distance / boundedDtMs;
-    const motionBlend = clamp01(speedPxPerMs / 1.6);
-    const visibilityBlend = (1 - SMOOTHING_VISIBILITY_WEIGHT) + (SMOOTHING_VISIBILITY_WEIGHT * point.visibility);
-    const adaptiveAlpha = clamp(
-      (SMOOTHING_BASE_ALPHA + ((SMOOTHING_MAX_ALPHA - SMOOTHING_BASE_ALPHA) * motionBlend)) * visibilityBlend,
-      SMOOTHING_MIN_ALPHA,
-      SMOOTHING_MAX_ALPHA
-    );
-    const alpha = clamp((1 - normalizedStability) + (normalizedStability * adaptiveAlpha), SMOOTHING_MIN_ALPHA, 1);
-    const visibilityAlpha = clamp(0.6 - (normalizedStability * 0.35), 0.22, 0.6);
-
-    return {
-      x: previousPoint.x + ((point.x - previousPoint.x) * alpha),
-      y: previousPoint.y + ((point.y - previousPoint.y) * alpha),
-      visibility: previousPoint.visibility + ((point.visibility - previousPoint.visibility) * visibilityAlpha),
-    };
-  });
+const describeArc = (
+  cx: number,
+  cy: number,
+  radius: number,
+  startAngle: number,
+  sweepAngle: number
+): string => {
+  const startX = cx + radius * Math.cos(startAngle);
+  const startY = cy + radius * Math.sin(startAngle);
+  const endAngle = startAngle + sweepAngle;
+  const endX = cx + radius * Math.cos(endAngle);
+  const endY = cy + radius * Math.sin(endAngle);
+  const largeArc = Math.abs(sweepAngle) > Math.PI ? 1 : 0;
+  const sweepFlag = sweepAngle > 0 ? 1 : 0;
+  return `M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArc} ${sweepFlag} ${endX} ${endY}`;
 };
 
-const getOneEuroParams = (stability: number): OneEuroFilterParams => {
-  const normalizedStability = clamp01(stability);
+// ── Angle label position ──
+
+const getAngleLabelPosition = (angle: JointAngle, radius: number) => {
+  const midAngle = angle.startAngle + angle.sweepAngle / 2;
   return {
-    minCutoff: lerp(ONE_EURO_MIN_CUTOFF_FAST, ONE_EURO_MIN_CUTOFF_STABLE, normalizedStability),
-    beta: lerp(ONE_EURO_BETA_FAST, ONE_EURO_BETA_STABLE, normalizedStability),
-    derivativeCutoff: lerp(
-      ONE_EURO_DERIVATIVE_CUTOFF_FAST,
-      ONE_EURO_DERIVATIVE_CUTOFF_STABLE,
-      normalizedStability
-    ),
+    x: angle.vertex.x + (radius + 8) * Math.cos(midAngle),
+    y: angle.vertex.y + (radius + 8) * Math.sin(midAngle),
   };
-};
-
-const smoothSelectedPoseWithOneEuro = (
-  nextPose: ProjectedPoint[],
-  previousPose: ProjectedPoint[] | null,
-  previousState: OneEuroLandmarkState[] | null,
-  dtMs: number,
-  sourceWidth: number,
-  sourceHeight: number,
-  stability: number,
-  minVisibility: number,
-  useIsolatedJointRejection: boolean,
-  lagMs: number
-) => {
-  if (!previousPose || previousPose.length !== nextPose.length) {
-    return { pose: nextPose, state: null as OneEuroLandmarkState[] | null };
-  }
-
-  const normalizedStability = clamp01(stability);
-  const sourceDiagonal = Math.hypot(sourceWidth, sourceHeight);
-  const resetDistanceRatio = SMOOTHING_RESET_DISTANCE_MAX_RATIO
-    - ((SMOOTHING_RESET_DISTANCE_MAX_RATIO - SMOOTHING_RESET_DISTANCE_MIN_RATIO) * normalizedStability);
-  const resetDistance = sourceDiagonal * resetDistanceRatio;
-
-  const hasLargeJump = !useIsolatedJointRejection && nextPose.some((point, index) => {
-    const previousPoint = previousPose[index];
-    if (!previousPoint) return true;
-    return Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y) > resetDistance;
-  });
-
-  if (hasLargeJump) {
-    return { pose: nextPose, state: null as OneEuroLandmarkState[] | null };
-  }
-
-  const params = getOneEuroParams(normalizedStability);
-  const holdThreshold = Math.max(ONE_EURO_LOW_CONFIDENCE_BASE, minVisibility * 0.7);
-  const maxHoldFrames = Math.round(lerp(ONE_EURO_HOLD_FRAMES_MIN, ONE_EURO_HOLD_FRAMES_MAX, normalizedStability));
-  const nextState = previousState && previousState.length === nextPose.length
-    ? previousState
-    : nextPose.map((point) => ({
-      xFilter: createOneEuroScalarState(),
-      yFilter: createOneEuroScalarState(),
-      visibility: point.visibility,
-      holdFrames: 0,
-    }));
-
-  const smoothedPose = nextPose.map((point, index) => {
-    const landmarkState = nextState[index];
-    const previousPoint = previousPose[index] ?? point;
-    const isLowConfidence = point.visibility < holdThreshold;
-
-    const distance = Math.hypot(point.x - previousPoint.x, point.y - previousPoint.y);
-    const isImpossiblyFast = distance > resetDistance;
-
-    if (useIsolatedJointRejection && isImpossiblyFast && !isLowConfidence) {
-      if (landmarkState.holdFrames < maxHoldFrames) {
-        landmarkState.holdFrames += 1;
-        return {
-          x: previousPoint.x,
-          y: previousPoint.y,
-          visibility: clamp01(landmarkState.visibility),
-        };
-      } else {
-        landmarkState.xFilter.initialized = false;
-        landmarkState.yFilter.initialized = false;
-        landmarkState.holdFrames = 0;
-      }
-    }
-
-    if (isLowConfidence && landmarkState.holdFrames < maxHoldFrames) {
-      landmarkState.holdFrames += 1;
-      landmarkState.visibility += (point.visibility - landmarkState.visibility) * 0.2;
-      return {
-        x: previousPoint.x,
-        y: previousPoint.y,
-        visibility: clamp01(landmarkState.visibility),
-      };
-    }
-
-    landmarkState.holdFrames = 0;
-    const smoothedX = updateOneEuroScalar(landmarkState.xFilter, point.x, dtMs, params);
-    const smoothedY = updateOneEuroScalar(landmarkState.yFilter, point.y, dtMs, params);
-
-    let finalX = smoothedX;
-    let finalY = smoothedY;
-
-    if (lagMs > 0) {
-      const maxExtrapolationMs = clamp(lagMs, 0, 150);
-      const lagSeconds = maxExtrapolationMs / 1000;
-      finalX += landmarkState.xFilter.filteredDerivative * lagSeconds;
-      finalY += landmarkState.yFilter.filteredDerivative * lagSeconds;
-    }
-
-    const visibilityAlpha = clamp(0.52 - (normalizedStability * 0.28), 0.2, 0.52);
-    landmarkState.visibility += (point.visibility - landmarkState.visibility) * visibilityAlpha;
-
-    return {
-      x: finalX,
-      y: finalY,
-      visibility: clamp01(landmarkState.visibility),
-    };
-  });
-
-  return { pose: smoothedPose, state: nextState };
 };
 
 export default function PoseOverlay({
@@ -383,27 +178,17 @@ export default function PoseOverlay({
   targetFps,
   useExactFrameSync,
   minVisibility,
-  stability,
-  useOneEuroFilter,
-  useIsolatedJointRejection,
-  useLagExtrapolation,
+  showCoG,
+  showJointAngles,
+  showBodyLean,
+  showJumpHeight,
   minPoseDetectionConfidence,
   minPosePresenceConfidence,
   minTrackingConfidence,
   onWorldLandmarks,
 }: PoseOverlayProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const lockAnchorRef = useRef<{ x: number; y: number } | null>(null);
-  const lockedPoseIndexHintRef = useRef<number | null>(null);
-  const previousMediaTimeRef = useRef<number | null>(null);
-  const didLoopRecentlyRef = useRef(false);
-  const smoothedPoseRef = useRef<ProjectedPoint[] | null>(null);
-  const smoothedPoseMediaTimeRef = useRef<number | null>(null);
-  const oneEuroStateRef = useRef<OneEuroLandmarkState[] | null>(null);
-  const forceSmoothingResetRef = useRef(false);
-
-  const [isSelectingTarget, setIsSelectingTarget] = useState(false);
-  const [isLocked, setIsLocked] = useState(false);
+  const jumpHeightStateRef = useRef<JumpHeightState>(createJumpHeightState());
 
   const { status, poses, worldPoses, error, inferenceFps, poseCount, mediaTimeMs, delegate, activeModel } = usePoseLandmarks({
     enabled,
@@ -426,228 +211,51 @@ export default function PoseOverlay({
     onWorldLandmarks(worldPoses[0] ?? null);
   }, [enabled, worldPoses, onWorldLandmarks]);
 
-
-  const projectedPoses = useMemo<ProjectedPoint[][]>(() => {
-    if (!poses || poses.length === 0) return [];
-    const sourceWidth = videoElement?.videoWidth || 1;
-    const sourceHeight = videoElement?.videoHeight || 1;
-    return poses.map((pose) => normalizeLandmarks(pose, sourceWidth, sourceHeight));
-  }, [poses, videoElement]);
-
+  // Reset jump height state when jump height is toggled off or pose disabled
   useEffect(() => {
-    if (projectedPoses.length === 0) {
-      setIsSelectingTarget(false);
+    if (!enabled || !showJumpHeight) {
+      jumpHeightStateRef.current = createJumpHeightState();
     }
-  }, [projectedPoses.length]);
-
-  useEffect(() => {
-    if (!enabled) {
-      smoothedPoseRef.current = null;
-      smoothedPoseMediaTimeRef.current = null;
-      oneEuroStateRef.current = null;
-      forceSmoothingResetRef.current = false;
-    }
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    smoothedPoseRef.current = null;
-    smoothedPoseMediaTimeRef.current = null;
-    oneEuroStateRef.current = null;
-    forceSmoothingResetRef.current = true;
-  }, [enabled, useOneEuroFilter]);
-
-  useEffect(() => {
-    const previous = previousMediaTimeRef.current;
-    if (previous !== null && mediaTimeMs + 150 < previous) {
-      didLoopRecentlyRef.current = true;
-      forceSmoothingResetRef.current = true;
-    }
-    previousMediaTimeRef.current = mediaTimeMs;
-  }, [mediaTimeMs]);
+  }, [enabled, showJumpHeight]);
 
   const sourceWidth = videoElement?.videoWidth || 1;
   const sourceHeight = videoElement?.videoHeight || 1;
-  const projectedBoxes = useMemo<Array<PoseBox | null>>(
-    () => projectedPoses.map((pose) => getPoseBox(pose, sourceWidth, sourceHeight)),
-    [projectedPoses, sourceWidth, sourceHeight]
-  );
+
+  // Project normalized [0,1] landmarks to pixel space for rendering
+  const projectedPoses = useMemo<ProjectedPoint[][]>(() => {
+    if (!poses || poses.length === 0) return [];
+    return poses.map((pose) => normalizeLandmarks(pose, sourceWidth, sourceHeight));
+  }, [poses, sourceWidth, sourceHeight]);
 
   if (!enabled) return null;
 
-  const selectedPoseIndex = (() => {
-    if (projectedPoses.length === 0) return -1;
-
-    if (!isLocked) {
-      return getAutoPoseIndex(projectedPoses);
-    }
-
-    if (didLoopRecentlyRef.current && lockedPoseIndexHintRef.current !== null) {
-      const loopIndex = lockedPoseIndexHintRef.current;
-      if (loopIndex >= 0 && loopIndex < projectedPoses.length) {
-        const center = projectedBoxes[loopIndex]?.center ?? getPoseCenter(projectedPoses[loopIndex]);
-        if (center) {
-          lockAnchorRef.current = center;
-        }
-        didLoopRecentlyRef.current = false;
-        return loopIndex;
-      }
-    }
-
-    if (!lockAnchorRef.current) {
-      const hintIndex = lockedPoseIndexHintRef.current;
-      if (hintIndex !== null && hintIndex >= 0 && hintIndex < projectedPoses.length) {
-        const center = projectedBoxes[hintIndex]?.center ?? getPoseCenter(projectedPoses[hintIndex]);
-        if (center) {
-          lockAnchorRef.current = center;
-        }
-        return hintIndex;
-      }
-
-      const autoIndex = getAutoPoseIndex(projectedPoses);
-      const center = autoIndex >= 0
-        ? projectedBoxes[autoIndex]?.center ?? getPoseCenter(projectedPoses[autoIndex])
-        : null;
-      if (center) {
-        lockAnchorRef.current = center;
-      }
-      return autoIndex;
-    }
-
-    const nearestIndex = getNearestPoseIndex(projectedPoses, lockAnchorRef.current);
-    const center = projectedBoxes[nearestIndex]?.center ?? getPoseCenter(projectedPoses[nearestIndex]);
-    if (center) {
-      lockAnchorRef.current = center;
-    }
-    return nearestIndex;
-  })();
-
-  if (selectedPoseIndex >= 0) {
-    lockedPoseIndexHintRef.current = selectedPoseIndex;
-  }
-
+  // Always auto-select the most prominent pose
+  const selectedPoseIndex = getAutoPoseIndex(projectedPoses);
   const selectedPose = selectedPoseIndex >= 0 ? projectedPoses[selectedPoseIndex] : null;
-
-  if (!selectedPose) {
-    smoothedPoseRef.current = null;
-    smoothedPoseMediaTimeRef.current = null;
-    oneEuroStateRef.current = null;
-  } else if (forceSmoothingResetRef.current || smoothedPoseMediaTimeRef.current !== mediaTimeMs) {
-    const previousTime = smoothedPoseMediaTimeRef.current;
-    const shouldReset = forceSmoothingResetRef.current
-      || previousTime === null
-      || mediaTimeMs <= previousTime
-      || mediaTimeMs - previousTime > 250;
-
-    let nextSmoothedPose: ProjectedPoint[];
-    const isYoloModel = modelVariant.startsWith('yolo');
-
-    if (shouldReset || isYoloModel) {
-      nextSmoothedPose = selectedPose;
-      oneEuroStateRef.current = null;
-    } else if (useOneEuroFilter) {
-      const currentVideoTimeMs = videoElement && Number.isFinite(videoElement.currentTime)
-        ? Math.floor(videoElement.currentTime * 1000)
-        : mediaTimeMs;
-
-      const oneEuroResult = smoothSelectedPoseWithOneEuro(
-        selectedPose,
-        smoothedPoseRef.current,
-        oneEuroStateRef.current,
-        mediaTimeMs - previousTime,
-        sourceWidth,
-        sourceHeight,
-        stability,
-        minVisibility,
-        useIsolatedJointRejection,
-        useLagExtrapolation ? Math.max(0, currentVideoTimeMs - mediaTimeMs) : 0
-      );
-      nextSmoothedPose = oneEuroResult.pose;
-      oneEuroStateRef.current = oneEuroResult.state;
-    } else {
-      nextSmoothedPose = smoothSelectedPose(
-        selectedPose,
-        smoothedPoseRef.current,
-        mediaTimeMs - previousTime,
-        sourceWidth,
-        sourceHeight,
-        stability
-      );
-      oneEuroStateRef.current = null;
-    }
-
-    smoothedPoseRef.current = nextSmoothedPose;
-    smoothedPoseMediaTimeRef.current = mediaTimeMs;
-    forceSmoothingResetRef.current = false;
-  }
-
-  const selectedPoseForRender = smoothedPoseRef.current ?? selectedPose;
-  const selectedBox = selectedPoseForRender
-    ? getPoseBox(selectedPoseForRender, sourceWidth, sourceHeight)
+  const selectedBox = selectedPose
+    ? getPoseBox(selectedPose, sourceWidth, sourceHeight)
     : null;
-  const drawPose = selectedPoseForRender && selectedPoseForRender.length > 0;
-  const visibleLandmarkCount = selectedPoseForRender
-    ? selectedPoseForRender.filter((point) => point.visibility >= minVisibility).length
+  const drawPose = selectedPose && selectedPose.length > 0;
+  const visibleLandmarkCount = selectedPose
+    ? selectedPose.filter((point) => point.visibility >= minVisibility).length
     : 0;
   const relaxedVisibilityGate = visibleLandmarkCount === 0;
-  const landmarkCount = selectedPoseForRender?.length ?? 0;
+  const landmarkCount = selectedPose?.length ?? 0;
   const preserveAspectRatio = objectFit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet';
 
-  const handleTapToLock = (event: React.MouseEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    if (!isSelectingTarget || projectedPoses.length === 0) return;
+  // ── Biomechanics computations (only when individually enabled) ──
+  const cog = (showCoG || showJumpHeight) && selectedPose ? computeCoG(selectedPose) : null;
+  const jointAngles = showJointAngles && selectedPose ? computeJointAngles(selectedPose) : [];
+  const bodyLean = showBodyLean && selectedPose ? computeBodyLean(selectedPose) : null;
+  const jumpHeight = showJumpHeight && cog
+    ? updateJumpHeight(jumpHeightStateRef.current, cog, sourceHeight, mediaTimeMs)
+    : null;
 
-    const svg = svgRef.current;
-    if (!svg) return;
-
-    const point = svg.createSVGPoint();
-    point.x = event.clientX;
-    point.y = event.clientY;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return;
-    const svgPoint = point.matrixTransform(ctm.inverse());
-
-    const nextTarget = { x: svgPoint.x, y: svgPoint.y };
-
-    const hitCandidates = projectedBoxes
-      .map((box, index) => ({ box, index }))
-      .filter((entry): entry is { box: PoseBox; index: number } => Boolean(entry.box))
-      .filter((entry) => isPointInBox(nextTarget, entry.box))
-      .sort((a, b) => a.box.area - b.box.area);
-
-    const targetIndex = hitCandidates.length > 0
-      ? hitCandidates[0].index
-      : getNearestPoseIndex(projectedPoses, nextTarget);
-
-    const center = projectedBoxes[targetIndex]?.center
-      ?? getPoseCenter(projectedPoses[targetIndex])
-      ?? nextTarget;
-
-    lockAnchorRef.current = center;
-    lockedPoseIndexHintRef.current = targetIndex;
-    forceSmoothingResetRef.current = true;
-    setIsLocked(true);
-    setIsSelectingTarget(false);
-  };
-
-  const handleUnlock = () => {
-    lockAnchorRef.current = null;
-    lockedPoseIndexHintRef.current = null;
-    forceSmoothingResetRef.current = true;
-    setIsLocked(false);
-    setIsSelectingTarget(false);
-  };
+  const arcRadius = Math.max(16, sourceWidth * 0.025);
+  const fontSize = Math.max(10, sourceWidth * 0.012);
 
   return (
     <div className="absolute inset-0 z-[9] h-full w-full pointer-events-none">
-      {isSelectingTarget && (
-        <div
-          className="absolute inset-0 z-10 cursor-crosshair pointer-events-auto"
-          onClick={handleTapToLock}
-          title="Tap a person to lock pose tracking"
-        />
-      )}
-
       <svg
         ref={svgRef}
         className="h-full w-full overflow-visible"
@@ -658,36 +266,6 @@ export default function PoseOverlay({
           transformOrigin: '50% 50%',
         }}
       >
-        {isSelectingTarget && projectedBoxes.map((box, index) => {
-          if (!box) return null;
-          const isSelected = index === selectedPoseIndex;
-          return (
-            <g key={`pose-box-${index}`}>
-              <rect
-                x={box.x}
-                y={box.y}
-                width={box.width}
-                height={box.height}
-                fill={isSelected ? 'rgba(16,185,129,0.12)' : 'rgba(14,165,233,0.08)'}
-                stroke={isSelected ? '#10b981' : '#38bdf8'}
-                strokeWidth={2 / scale}
-                vectorEffect="non-scaling-stroke"
-              />
-              <text
-                x={box.x + 6 / scale}
-                y={box.y + 14 / scale}
-                fill={isSelected ? '#d1fae5' : '#e0f2fe'}
-                fontSize={11 / scale}
-                fontWeight={700}
-                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.45)', strokeWidth: 2 / scale }}
-              >
-                Tap to lock
-              </text>
-            </g>
-          );
-        })}
-
-
         {selectedBox && (
           <rect
             x={selectedBox.x}
@@ -695,17 +273,16 @@ export default function PoseOverlay({
             width={selectedBox.width}
             height={selectedBox.height}
             fill="none"
-            stroke={isLocked ? '#facc15' : '#38bdf8'}
-            strokeDasharray={isLocked ? `${6 / scale} ${3 / scale}` : undefined}
+            stroke="#38bdf8"
             strokeWidth={2.2 / scale}
             vectorEffect="non-scaling-stroke"
           />
         )}
 
         {drawPose && POSE_CONNECTIONS.map(([fromIndex, toIndex]) => {
-          if (!selectedPoseForRender) return null;
-          const from = selectedPoseForRender[fromIndex];
-          const to = selectedPoseForRender[toIndex];
+          if (!selectedPose) return null;
+          const from = selectedPose[fromIndex];
+          const to = selectedPose[toIndex];
           if (!from || !to) return null;
           const lineGate = Math.min(minVisibility, 0.05);
           if (!relaxedVisibilityGate && (from.visibility < lineGate || to.visibility < lineGate)) return null;
@@ -728,7 +305,7 @@ export default function PoseOverlay({
           );
         })}
 
-        {drawPose && selectedPoseForRender?.map((point, index) => {
+        {drawPose && selectedPose?.map((point, index) => {
           if (!relaxedVisibilityGate && point.visibility < minVisibility) return null;
           const opacity = relaxedVisibilityGate
             ? Math.max(0.35, point.visibility || 0)
@@ -748,6 +325,159 @@ export default function PoseOverlay({
             />
           );
         })}
+
+        {/* ── Center of Gravity ── */}
+        {showCoG && cog && (
+          <g>
+            {/* Pulsing ring */}
+            <circle
+              cx={cog.x}
+              cy={cog.y}
+              r={8 / scale}
+              fill="none"
+              stroke="#facc15"
+              strokeWidth={1.5 / scale}
+              strokeOpacity={0.6}
+              vectorEffect="non-scaling-stroke"
+            >
+              <animate attributeName="r" values={`${8 / scale};${12 / scale};${8 / scale}`} dur="2s" repeatCount="indefinite" />
+              <animate attributeName="stroke-opacity" values="0.6;0.2;0.6" dur="2s" repeatCount="indefinite" />
+            </circle>
+            {/* Crosshair */}
+            <line x1={cog.x - 6 / scale} y1={cog.y} x2={cog.x + 6 / scale} y2={cog.y}
+              stroke="#facc15" strokeWidth={2 / scale} vectorEffect="non-scaling-stroke" />
+            <line x1={cog.x} y1={cog.y - 6 / scale} x2={cog.x} y2={cog.y + 6 / scale}
+              stroke="#facc15" strokeWidth={2 / scale} vectorEffect="non-scaling-stroke" />
+            {/* Dot */}
+            <circle cx={cog.x} cy={cog.y} r={2.5 / scale} fill="#facc15" />
+            {/* Label */}
+            <text
+              x={cog.x + 12 / scale}
+              y={cog.y - 4 / scale}
+              fill="#fde68a"
+              fontSize={fontSize / scale}
+              fontWeight={700}
+              style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.6)', strokeWidth: 2.5 / scale }}
+            >
+              CoG
+            </text>
+          </g>
+        )}
+
+        {/* ── Joint Angles ── */}
+        {jointAngles.map((angle) => {
+          const labelPos = getAngleLabelPosition(angle, arcRadius / scale);
+          return (
+            <g key={angle.label}>
+              {/* Arc */}
+              <path
+                d={describeArc(angle.vertex.x, angle.vertex.y, arcRadius / scale, angle.startAngle, angle.sweepAngle)}
+                fill="none"
+                stroke="rgba(255,255,255,0.75)"
+                strokeWidth={1.5 / scale}
+                vectorEffect="non-scaling-stroke"
+              />
+              {/* Degree label */}
+              <text
+                x={labelPos.x}
+                y={labelPos.y}
+                fill="#ffffff"
+                fontSize={fontSize * 0.85 / scale}
+                fontWeight={600}
+                textAnchor="middle"
+                dominantBaseline="central"
+                style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 2 / scale }}
+              >
+                {`${Math.round(angle.degrees)}°`}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* ── Body Lean ── */}
+        {bodyLean && (
+          <g>
+            {/* Vertical reference line from hip midpoint */}
+            <line
+              x1={bodyLean.hipMid.x}
+              y1={bodyLean.hipMid.y}
+              x2={bodyLean.hipMid.x}
+              y2={bodyLean.shoulderMid.y}
+              stroke="rgba(34,211,238,0.35)"
+              strokeWidth={1.5 / scale}
+              strokeDasharray={`${4 / scale} ${3 / scale}`}
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Actual torso line (already drawn by skeleton, but we highlight) */}
+            <line
+              x1={bodyLean.hipMid.x}
+              y1={bodyLean.hipMid.y}
+              x2={bodyLean.shoulderMid.x}
+              y2={bodyLean.shoulderMid.y}
+              stroke="#22d3ee"
+              strokeWidth={2 / scale}
+              strokeOpacity={0.7}
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Lean label */}
+            <text
+              x={bodyLean.hipMid.x + 14 / scale}
+              y={(bodyLean.hipMid.y + bodyLean.shoulderMid.y) / 2}
+              fill="#22d3ee"
+              fontSize={fontSize / scale}
+              fontWeight={700}
+              style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 2 / scale }}
+            >
+              {`${Math.abs(bodyLean.angleDeg).toFixed(1)}° ${bodyLean.angleDeg > 0.5 ? 'R' : bodyLean.angleDeg < -0.5 ? 'L' : ''}`}
+            </text>
+          </g>
+        )}
+
+        {/* ── Jump Height ── */}
+        {jumpHeight && (
+          <g>
+            {/* Baseline horizontal line */}
+            <line
+              x1={jumpHeight.cogPosition.x - 30 / scale}
+              y1={jumpHeight.baselineY}
+              x2={jumpHeight.cogPosition.x + 30 / scale}
+              y2={jumpHeight.baselineY}
+              stroke="#22c55e"
+              strokeWidth={1.5 / scale}
+              strokeDasharray={`${4 / scale} ${2 / scale}`}
+              strokeOpacity={0.7}
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Vertical arrow from baseline to CoG */}
+            <line
+              x1={jumpHeight.cogPosition.x}
+              y1={jumpHeight.baselineY}
+              x2={jumpHeight.cogPosition.x}
+              y2={jumpHeight.cogPosition.y}
+              stroke="#22c55e"
+              strokeWidth={2 / scale}
+              strokeOpacity={0.8}
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Triangle arrowhead at top */}
+            <polygon
+              points={`${jumpHeight.cogPosition.x},${jumpHeight.cogPosition.y} ${jumpHeight.cogPosition.x - 4 / scale},${jumpHeight.cogPosition.y + 8 / scale} ${jumpHeight.cogPosition.x + 4 / scale},${jumpHeight.cogPosition.y + 8 / scale}`}
+              fill="#22c55e"
+              fillOpacity={0.8}
+            />
+            {/* Height label */}
+            <text
+              x={jumpHeight.cogPosition.x + 10 / scale}
+              y={(jumpHeight.baselineY + jumpHeight.cogPosition.y) / 2}
+              fill="#86efac"
+              fontSize={fontSize * 1.1 / scale}
+              fontWeight={700}
+              style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.6)', strokeWidth: 2.5 / scale }}
+            >
+              {`↑ ${(jumpHeight.heightFraction * 100).toFixed(0)}%`}
+            </text>
+          </g>
+        )}
       </svg>
 
       <div
@@ -759,35 +489,9 @@ export default function PoseOverlay({
         {status === 'error' ? (
           `Pose error: ${error ?? 'unknown'}`
         ) : (
-          <div className="flex items-center gap-2">
-            <span>
-              {`Pose ${status === 'loading' ? 'loading' : 'live'} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount} stab:${stability.toFixed(2)} ${useOneEuroFilter ? 'oe:on' : 'oe:off'} · ${isLocked ? 'locked' : 'auto'}${isSelectingTarget ? ' (tap box)' : ''}`}
-            </span>
-            {projectedPoses.length > 1 && !isLocked && (
-              <button
-                type="button"
-                className="rounded border border-white/30 px-1.5 py-0.5 text-[10px] hover:bg-white/15"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setIsSelectingTarget((prev) => !prev);
-                }}
-              >
-                {isSelectingTarget ? 'Cancel' : 'Tap target'}
-              </button>
-            )}
-            {isLocked && (
-              <button
-                type="button"
-                className="rounded border border-white/30 px-1.5 py-0.5 text-[10px] hover:bg-white/15"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleUnlock();
-                }}
-              >
-                Unlock
-              </button>
-            )}
-          </div>
+          <span>
+            {`Pose ${status === 'loading' ? 'loading' : 'live'} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount}`}
+          </span>
         )}
       </div>
     </div>

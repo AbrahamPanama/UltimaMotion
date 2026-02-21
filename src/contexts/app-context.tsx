@@ -72,10 +72,6 @@ interface AppContextType {
   setPoseAnalyzeScope: (scope: PoseAnalyzeScope) => void;
   poseMinVisibility: number;
   setPoseMinVisibility: (value: number) => void;
-  poseStability: number;
-  setPoseStability: (value: number) => void;
-  poseUseOneEuroFilter: boolean;
-  setPoseUseOneEuroFilter: (value: boolean) => void;
   poseTargetFps: number;
   setPoseTargetFps: (value: number) => void;
   poseMinPoseDetectionConfidence: number;
@@ -86,10 +82,14 @@ interface AppContextType {
   setPoseMinTrackingConfidence: (value: number) => void;
   poseUseExactFrameSync: boolean;
   setPoseUseExactFrameSync: (value: boolean) => void;
-  poseUseIsolatedJointRejection: boolean;
-  setPoseUseIsolatedJointRejection: (value: boolean) => void;
-  poseUseLagExtrapolation: boolean;
-  setPoseUseLagExtrapolation: (value: boolean) => void;
+  poseShowCoG: boolean;
+  setPoseShowCoG: (value: boolean) => void;
+  poseShowJointAngles: boolean;
+  setPoseShowJointAngles: (value: boolean) => void;
+  poseShowBodyLean: boolean;
+  setPoseShowBodyLean: (value: boolean) => void;
+  poseShowJumpHeight: boolean;
+  setPoseShowJumpHeight: (value: boolean) => void;
 
   // 3D viewer
   is3DViewEnabled: boolean;
@@ -130,15 +130,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('heavy');
   const [poseAnalyzeScope, setPoseAnalyzeScope] = useState<PoseAnalyzeScope>('all-visible');
   const [poseMinVisibility, setPoseMinVisibility] = useState<number>(0.25);
-  const [poseStability, setPoseStability] = useState<number>(0.85); // Increased default stability for less jitter out-of-the-box
-  const [poseUseOneEuroFilter, setPoseUseOneEuroFilter] = useState<boolean>(true);
-  const [poseTargetFps, setPoseTargetFps] = useState<number>(30); // Raised to 30fps to better match video playback rates
-  const [poseMinPoseDetectionConfidence, setPoseMinPoseDetectionConfidence] = useState<number>(0.55); // Increased to ignore faint phantom limbs
-  const [poseMinPosePresenceConfidence, setPoseMinPosePresenceConfidence] = useState<number>(0.65); // Increased to drop low-confidence occluded jumps
-  const [poseMinTrackingConfidence, setPoseMinTrackingConfidence] = useState<number>(0.65); // Increased for stable skeleton persistence
+  const [poseTargetFps, setPoseTargetFps] = useState<number>(30);
+  const [poseMinPoseDetectionConfidence, setPoseMinPoseDetectionConfidence] = useState<number>(0.55);
+  const [poseMinPosePresenceConfidence, setPoseMinPosePresenceConfidence] = useState<number>(0.65);
+  const [poseMinTrackingConfidence, setPoseMinTrackingConfidence] = useState<number>(0.65);
   const [poseUseExactFrameSync, setPoseUseExactFrameSync] = useState<boolean>(true);
-  const [poseUseIsolatedJointRejection, setPoseUseIsolatedJointRejection] = useState<boolean>(true);
-  const [poseUseLagExtrapolation, setPoseUseLagExtrapolation] = useState<boolean>(true);
+  const [poseShowCoG, setPoseShowCoG] = useState<boolean>(false);
+  const [poseShowJointAngles, setPoseShowJointAngles] = useState<boolean>(false);
+  const [poseShowBodyLean, setPoseShowBodyLean] = useState<boolean>(false);
+  const [poseShowJumpHeight, setPoseShowJumpHeight] = useState<boolean>(false);
   const [is3DViewEnabled, setIs3DViewEnabled] = useState<boolean>(false);
 
   const loadLibrary = useCallback(async () => {
@@ -307,10 +307,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseMinVisibility(clampUnit(value));
   };
 
-  const handleSetPoseStability = (value: number) => {
-    setPoseStability(clampUnit(value));
-  };
-
   const handleSetPoseTargetFps = (value: number) => {
     setPoseTargetFps(clampFps(value));
   };
@@ -424,10 +420,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseAnalyzeScope,
     poseMinVisibility,
     setPoseMinVisibility: handleSetPoseMinVisibility,
-    poseStability,
-    setPoseStability: handleSetPoseStability,
-    poseUseOneEuroFilter,
-    setPoseUseOneEuroFilter,
     poseTargetFps,
     setPoseTargetFps: handleSetPoseTargetFps,
     poseMinPoseDetectionConfidence,
@@ -438,10 +430,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseMinTrackingConfidence: handleSetPoseMinTrackingConfidence,
     poseUseExactFrameSync,
     setPoseUseExactFrameSync,
-    poseUseIsolatedJointRejection,
-    setPoseUseIsolatedJointRejection,
-    poseUseLagExtrapolation,
-    setPoseUseLagExtrapolation,
+    poseShowCoG,
+    setPoseShowCoG,
+    poseShowJointAngles,
+    setPoseShowJointAngles,
+    poseShowBodyLean,
+    setPoseShowBodyLean,
+    poseShowJumpHeight,
+    setPoseShowJumpHeight,
 
     // 3D viewer
     is3DViewEnabled,
