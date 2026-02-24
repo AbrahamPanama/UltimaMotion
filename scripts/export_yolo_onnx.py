@@ -6,8 +6,14 @@ def export_models():
     model_names = [
         "yolo26n-pose.pt",
         "yolo26s-pose.pt",
+        "yolo26m-pose.pt",
+        "yolo26l-pose.pt",
+        "yolo26x-pose.pt",
         "yolo26n-seg.pt",
-        "yolo26s-seg.pt"
+        "yolo26s-seg.pt",
+        "yolo26m-seg.pt",
+        "yolo26l-seg.pt",
+        "yolo26x-seg.pt"
     ]
     
     # Destination directory for the web app
@@ -19,6 +25,10 @@ def export_models():
     for model_name in model_names:
         print(f"\nProcessing {model_name}...")
         try:
+            if not os.path.exists(model_name):
+                print(f"Skipping {model_name}: file not found.")
+                continue
+
             # Load the model
             model = YOLO(model_name)
             

@@ -21,12 +21,11 @@ interface VideoTileProps {
   video: Video | null;
   index: number;
   isActive: boolean;
-  onWorldLandmarks?: (landmarks: import('@mediapipe/tasks-vision').NormalizedLandmark[] | null) => void;
 }
 
 const DEFAULT_POSITION = { x: 0, y: 0 };
 
-export default function VideoTile({ video, index, isActive, onWorldLandmarks }: VideoTileProps) {
+export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const {
     setActiveTileIndex,
     videoRefs,
@@ -59,7 +58,11 @@ export default function VideoTile({ video, index, isActive, onWorldLandmarks }: 
     poseMinVisibility,
     poseTargetFps,
     poseUseExactFrameSync,
+    poseUseSmoothing,
+    poseUsePreprocessCache,
+    poseUseYoloMultiPerson,
     poseShowCoG,
+    poseShowCoGCharts,
     poseShowJointAngles,
     poseShowBodyLean,
     poseShowJumpHeight,
@@ -558,17 +561,23 @@ export default function VideoTile({ video, index, isActive, onWorldLandmarks }: 
             position={position}
             objectFit={isPortraitMode ? 'cover' : 'contain'}
             modelVariant={poseModelVariant}
+            videoId={video?.id ?? null}
+            trimStartSec={video?.trimStart ?? 0}
+            trimEndSec={video?.trimEnd ?? null}
             targetFps={poseTargetFps}
             useExactFrameSync={poseUseExactFrameSync}
+            useSmoothing={poseUseSmoothing}
+            usePreprocessCache={poseUsePreprocessCache}
+            useYoloMultiPerson={poseUseYoloMultiPerson}
             minVisibility={poseMinVisibility}
             showCoG={poseShowCoG}
+            showCoGCharts={poseShowCoGCharts}
             showJointAngles={poseShowJointAngles}
             showBodyLean={poseShowBodyLean}
             showJumpHeight={poseShowJumpHeight}
             minPoseDetectionConfidence={poseMinPoseDetectionConfidence}
             minPosePresenceConfidence={poseMinPosePresenceConfidence}
             minTrackingConfidence={poseMinTrackingConfidence}
-            onWorldLandmarks={onWorldLandmarks}
           />
         )}
 

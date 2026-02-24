@@ -12,7 +12,15 @@ export type Video = {
 
 export type DrawingType = 'free' | 'line' | 'arrow' | 'angle' | 'rectangle' | 'circle' | 'text';
 
-export type PoseModelVariant = 'lite' | 'full' | 'heavy' | 'yolo26-nano' | 'yolo26-small';
+export type PoseModelVariant =
+  | 'lite'
+  | 'full'
+  | 'heavy'
+  | 'yolo26-nano'
+  | 'yolo26-small'
+  | 'yolo26-medium'
+  | 'yolo26-large'
+  | 'yolo26-xlarge';
 export type PoseAnalyzeScope = 'active-tile' | 'all-visible';
 
 export interface Point {

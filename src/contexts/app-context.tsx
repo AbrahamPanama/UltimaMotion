@@ -82,18 +82,22 @@ interface AppContextType {
   setPoseMinTrackingConfidence: (value: number) => void;
   poseUseExactFrameSync: boolean;
   setPoseUseExactFrameSync: (value: boolean) => void;
+  poseUseSmoothing: boolean;
+  setPoseUseSmoothing: (value: boolean) => void;
+  poseUsePreprocessCache: boolean;
+  setPoseUsePreprocessCache: (value: boolean) => void;
+  poseUseYoloMultiPerson: boolean;
+  setPoseUseYoloMultiPerson: (value: boolean) => void;
   poseShowCoG: boolean;
   setPoseShowCoG: (value: boolean) => void;
+  poseShowCoGCharts: boolean;
+  setPoseShowCoGCharts: (value: boolean) => void;
   poseShowJointAngles: boolean;
   setPoseShowJointAngles: (value: boolean) => void;
   poseShowBodyLean: boolean;
   setPoseShowBodyLean: (value: boolean) => void;
   poseShowJumpHeight: boolean;
   setPoseShowJumpHeight: (value: boolean) => void;
-
-  // 3D viewer
-  is3DViewEnabled: boolean;
-  toggle3DView: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -127,19 +131,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // Pose overlay state
   const [isPoseEnabled, setIsPoseEnabled] = useState<boolean>(false);
-  const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('heavy');
+  const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('yolo26-xlarge');
   const [poseAnalyzeScope, setPoseAnalyzeScope] = useState<PoseAnalyzeScope>('all-visible');
   const [poseMinVisibility, setPoseMinVisibility] = useState<number>(0.25);
-  const [poseTargetFps, setPoseTargetFps] = useState<number>(30);
+  const [poseTargetFps, setPoseTargetFps] = useState<number>(60);
   const [poseMinPoseDetectionConfidence, setPoseMinPoseDetectionConfidence] = useState<number>(0.55);
   const [poseMinPosePresenceConfidence, setPoseMinPosePresenceConfidence] = useState<number>(0.65);
   const [poseMinTrackingConfidence, setPoseMinTrackingConfidence] = useState<number>(0.65);
   const [poseUseExactFrameSync, setPoseUseExactFrameSync] = useState<boolean>(true);
+  const [poseUseSmoothing, setPoseUseSmoothing] = useState<boolean>(false);
+  const [poseUsePreprocessCache, setPoseUsePreprocessCache] = useState<boolean>(true);
+  const [poseUseYoloMultiPerson, setPoseUseYoloMultiPerson] = useState<boolean>(true);
   const [poseShowCoG, setPoseShowCoG] = useState<boolean>(false);
+  const [poseShowCoGCharts, setPoseShowCoGCharts] = useState<boolean>(true);
   const [poseShowJointAngles, setPoseShowJointAngles] = useState<boolean>(false);
   const [poseShowBodyLean, setPoseShowBodyLean] = useState<boolean>(false);
   const [poseShowJumpHeight, setPoseShowJumpHeight] = useState<boolean>(false);
-  const [is3DViewEnabled, setIs3DViewEnabled] = useState<boolean>(false);
 
   const loadLibrary = useCallback(async () => {
     try {
@@ -283,23 +290,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const toggleDrawing = () => setIsDrawingEnabled(prev => !prev);
   const togglePose = () => setIsPoseEnabled(prev => !prev);
 
-  const toggle3DView = () => {
-    setIs3DViewEnabled(prev => {
-      const next = !prev;
-      if (next) {
-        // Force single-slot layout and clear extra slots
-        setLayout(1);
-        setSlots(prevSlots => {
-          const newSlots = [...prevSlots];
-          for (let i = 1; i < MAX_SLOTS; i++) newSlots[i] = null;
-          return newSlots;
-        });
-        setActiveTileIndex(0);
-      }
-      return next;
-    });
-  };
-
   const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
   const clampFps = (value: number) => Math.max(5, Math.min(60, Math.round(value)));
 
@@ -430,18 +420,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseMinTrackingConfidence: handleSetPoseMinTrackingConfidence,
     poseUseExactFrameSync,
     setPoseUseExactFrameSync,
+    poseUseSmoothing,
+    setPoseUseSmoothing,
+    poseUsePreprocessCache,
+    setPoseUsePreprocessCache,
+    poseUseYoloMultiPerson,
+    setPoseUseYoloMultiPerson,
     poseShowCoG,
     setPoseShowCoG,
+    poseShowCoGCharts,
+    setPoseShowCoGCharts,
     poseShowJointAngles,
     setPoseShowJointAngles,
     poseShowBodyLean,
     setPoseShowBodyLean,
     poseShowJumpHeight,
     setPoseShowJumpHeight,
-
-    // 3D viewer
-    is3DViewEnabled,
-    toggle3DView,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

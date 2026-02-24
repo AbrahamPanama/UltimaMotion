@@ -6,6 +6,7 @@ export type PoseDelegate = 'GPU' | 'CPU' | 'WASM-ONNX' | 'WEBGPU-ONNX';
 export interface PoseRuntimeConfig {
   modelVariant: PoseModelVariant;
   numPoses: number;
+  yoloMultiPerson: boolean;
   minPoseDetectionConfidence: number;
   minPosePresenceConfidence: number;
   minTrackingConfidence: number;
@@ -24,6 +25,9 @@ const MODEL_PATHS: Record<PoseModelVariant, string> = {
   heavy: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task',
   'yolo26-nano': '/models/yolo26/yolo26n-pose.onnx',
   'yolo26-small': '/models/yolo26/yolo26s-pose.onnx',
+  'yolo26-medium': '/models/yolo26/yolo26m-pose.onnx',
+  'yolo26-large': '/models/yolo26/yolo26l-pose.onnx',
+  'yolo26-xlarge': '/models/yolo26/yolo26x-pose.onnx',
 };
 
 const buildOptionsKey = (config: PoseRuntimeConfig) =>
@@ -47,6 +51,16 @@ export class PoseRuntime {
   private onnxDelegate: OnnxPoseDelegate | null = null;
   private lastTimestampMs = -1;
   private needsTrackerReset = false;
+
+  private async assertOnnxModelExists(modelUrl: string) {
+    const response = await fetch(modelUrl, { method: 'HEAD', cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(
+        `YOLO model file missing (${response.status}) at ${modelUrl}. ` +
+        'Add the exported ONNX file under /public/models/yolo26/ and retry.'
+      );
+    }
+  }
 
   private async getVisionLib() {
     if (!this.visionLib) {
@@ -156,9 +170,12 @@ export class PoseRuntime {
         this.onnxDelegate?.close();
         this.onnxDelegate = new OnnxPoseDelegate();
 
-        const isNano = config.modelVariant === 'yolo26-nano';
-        const modelPath = isNano ? '/models/yolo26/yolo26n-pose.onnx' : '/models/yolo26/yolo26s-pose.onnx';
+        const modelPath = MODEL_PATHS[config.modelVariant];
+        if (!modelPath.endsWith('.onnx')) {
+          throw new Error(`Invalid YOLO model variant: ${config.modelVariant}`);
+        }
         const absoluteUrl = new URL(modelPath, window.location.origin).href;
+        await this.assertOnnxModelExists(absoluteUrl);
 
         await this.onnxDelegate.initialize(absoluteUrl);
 
@@ -192,7 +209,10 @@ export class PoseRuntime {
     if (config.modelVariant.startsWith('yolo')) {
       await this.ensureOnnxReady(config);
       if (!this.onnxDelegate) return null;
-      return this.onnxDelegate.detect(videoFrame as HTMLVideoElement);
+      return this.onnxDelegate.detect(videoFrame as HTMLVideoElement, {
+        multiPerson: config.yoloMultiPerson,
+        maxPoses: config.numPoses,
+      });
     }
 
     // Detect backwards time jumps (loop/seek) and force tracker reset

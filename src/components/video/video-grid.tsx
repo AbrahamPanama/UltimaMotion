@@ -5,9 +5,7 @@ import VideoTile from './video-tile';
 import { cn } from '@/lib/utils';
 import PlayerControls from './player-controls';
 import type { Video } from '@/types';
-import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { useIsMobile } from '@/hooks/use-mobile';
-import Pose3DPanel from './pose-3d-panel';
 
 export default function VideoGrid() {
     const {
@@ -19,16 +17,9 @@ export default function VideoGrid() {
         isLoopEnabled,
         syncOffsets,
         playbackRate,
-        is3DViewEnabled,
         setPlaybackRate
     } = useAppContext();
     const isMobile = useIsMobile();
-
-    const worldLandmarksRef = useRef<NormalizedLandmark[] | null>(null);
-
-    const handleWorldLandmarks = useCallback((lm: NormalizedLandmark[] | null) => {
-        worldLandmarksRef.current = lm;
-    }, []);
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -187,7 +178,6 @@ export default function VideoGrid() {
                                 video={video}
                                 index={index}
                                 isActive={activeTileIndex === index}
-                                onWorldLandmarks={index === 0 ? handleWorldLandmarks : undefined}
                             />
                         </div>
                     ))}
@@ -210,10 +200,6 @@ export default function VideoGrid() {
                     </div>
                 )}
             </div>
-
-            {is3DViewEnabled && (
-                <Pose3DPanel worldLandmarksRef={worldLandmarksRef} />
-            )}
         </div>
     );
 }
