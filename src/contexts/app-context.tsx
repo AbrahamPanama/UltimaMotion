@@ -3,6 +3,13 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import type { Video, Drawing, DrawingType, PoseModelVariant, PoseAnalyzeScope } from '@/types';
 import { initDB, getAllVideos, addVideo as addVideoDB, deleteVideo as deleteVideoDB } from '@/lib/db';
+import {
+  buildPoseAnalysisCacheId,
+  loadPoseAnalysisCache,
+  type PoseAnalysisCacheKey,
+} from '@/lib/pose/pose-analysis-cache';
+import { preprocessPoseVideoClip } from '@/lib/pose/pose-preprocess-job';
+import type { PoseRuntimeConfig } from '@/lib/pose/pose-runtime';
 import { useToast } from "@/hooks/use-toast";
 
 const MAX_SLOTS = 4;
@@ -10,12 +17,32 @@ const MAX_SLOTS = 4;
 export const SYNC_DRAWINGS_KEY = '__sync_drawings__';
 
 type Layout = 1 | 2 | 4;
+type PoseProcessingStatus = 'idle' | 'processing' | 'ready' | 'error';
+
+export interface PoseProcessingState {
+  status: PoseProcessingStatus;
+  progress: number;
+  etaSec: number | null;
+  error: string | null;
+  updatedAtMs: number;
+}
+
+const createIdlePoseProcessingState = (): PoseProcessingState => ({
+  status: 'idle',
+  progress: 0,
+  etaSec: null,
+  error: null,
+  updatedAtMs: Date.now(),
+});
 
 interface AppContextType {
   library: Video[];
   loadLibrary: () => Promise<void>;
   addVideoToLibrary: (video: Omit<Video, 'id' | 'url' | 'createdAt'>) => Promise<void>;
   removeVideoFromLibrary: (id: string) => Promise<void>;
+  poseProcessingByVideo: Record<string, PoseProcessingState>;
+  getPoseProcessingState: (videoId?: string | null) => PoseProcessingState;
+  processPoseForVideo: (video: Video) => Promise<boolean>;
 
   slots: (Video | null)[];
   setSlot: (index: number, video: Video | null) => void;
@@ -106,6 +133,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [library, setLibrary] = useState<Video[]>([]);
   const [slots, setSlots] = useState<(Video | null)[]>(Array(MAX_SLOTS).fill(null));
   const [layout, setLayout] = useState<Layout>(1);
+  const [poseProcessingByVideo, setPoseProcessingByVideo] = useState<Record<string, PoseProcessingState>>({});
   const [isSyncEnabled, setIsSyncEnabled] = useState<boolean>(false);
   const [isPortraitMode, setIsPortraitMode] = useState<boolean>(false);
   const [isLoopEnabled, setIsLoopEnabled] = useState<boolean>(true);
@@ -114,6 +142,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [activeTileIndex, setActiveTileIndex] = useState<number | null>(0);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
+  const poseProcessingPromisesRef = useRef<Record<string, Promise<boolean>>>({});
   const libraryRef = useRef<Video[]>([]);
   const { toast } = useToast();
 
@@ -204,6 +233,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const removeVideoFromLibrary = async (id: string) => {
     try {
       await deleteVideoDB(id);
+      delete poseProcessingPromisesRef.current[id];
+      setPoseProcessingByVideo(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       setLibrary(prev => {
         const videoToRemove = prev.find(v => v.id === id);
         if (videoToRemove) URL.revokeObjectURL(videoToRemove.url);
@@ -316,7 +351,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const updateSyncOffset = useCallback((index: number, delta: number) => {
     setSyncOffsets(prev => {
       const newOffsets = [...prev];
-      newOffsets[index] = (newOffsets[index] || 0) + delta;
+      const next = (newOffsets[index] || 0) + delta;
+      newOffsets[index] = Number(next.toFixed(6));
       return newOffsets;
     });
   }, []);
@@ -359,11 +395,205 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const toggleSyncDrawings = () => setIsSyncDrawingsEnabled(v => !v);
 
+  const buildPoseCacheKeyForVideo = useCallback((video: Video): PoseAnalysisCacheKey => {
+    const trimStartSec = Number.isFinite(video.trimStart) ? Math.max(0, video.trimStart ?? 0) : 0;
+    const trimEndCandidate = Number.isFinite(video.trimEnd) ? video.trimEnd ?? trimStartSec : video.duration;
+    const trimEndSec = Math.max(
+      trimStartSec,
+      Number.isFinite(trimEndCandidate) ? trimEndCandidate : trimStartSec
+    );
+    return {
+      videoId: video.id,
+      modelVariant: poseModelVariant,
+      targetFps: poseTargetFps,
+      yoloMultiPerson: poseUseYoloMultiPerson,
+      trimStartMs: Math.max(0, Math.floor(trimStartSec * 1000)),
+      trimEndMs: Math.max(0, Math.floor(trimEndSec * 1000)),
+    };
+  }, [poseModelVariant, poseTargetFps, poseUseYoloMultiPerson]);
+
+  const getPoseProcessingState = useCallback(
+    (videoId?: string | null): PoseProcessingState => {
+      if (!videoId) return createIdlePoseProcessingState();
+      return poseProcessingByVideo[videoId] ?? createIdlePoseProcessingState();
+    },
+    [poseProcessingByVideo]
+  );
+
+  const processPoseForVideo = useCallback(async (video: Video) => {
+    if (!video?.id) return false;
+
+    const existingPromise = poseProcessingPromisesRef.current[video.id];
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const processPromise = (async () => {
+      const cacheKey = buildPoseCacheKeyForVideo(video);
+      const cacheId = buildPoseAnalysisCacheId(cacheKey);
+
+      setPoseProcessingByVideo(prev => ({
+        ...prev,
+        [video.id]: {
+          status: 'processing',
+          progress: 0,
+          etaSec: null,
+          error: null,
+          updatedAtMs: Date.now(),
+        },
+      }));
+
+      try {
+        const cached = await loadPoseAnalysisCache(cacheId);
+        if (cached && cached.frames.length > 0) {
+          setPoseProcessingByVideo(prev => ({
+            ...prev,
+            [video.id]: {
+              status: 'ready',
+              progress: 1,
+              etaSec: 0,
+              error: null,
+              updatedAtMs: Date.now(),
+            },
+          }));
+          return true;
+        }
+
+        const runtimeConfig: PoseRuntimeConfig = {
+          modelVariant: poseModelVariant,
+          numPoses: 4,
+          yoloMultiPerson: poseUseYoloMultiPerson,
+          minPoseDetectionConfidence: poseMinPoseDetectionConfidence,
+          minPosePresenceConfidence: poseMinPosePresenceConfidence,
+          minTrackingConfidence: poseMinTrackingConfidence,
+        };
+
+        await preprocessPoseVideoClip({
+          video,
+          cacheKey,
+          runtimeConfig,
+          targetFps: poseTargetFps,
+          onProgress: (progress, etaSec) => {
+            setPoseProcessingByVideo(prev => ({
+              ...prev,
+              [video.id]: {
+                status: 'processing',
+                progress,
+                etaSec,
+                error: null,
+                updatedAtMs: Date.now(),
+              },
+            }));
+          },
+        });
+
+        setPoseProcessingByVideo(prev => ({
+          ...prev,
+          [video.id]: {
+            status: 'ready',
+            progress: 1,
+            etaSec: 0,
+            error: null,
+            updatedAtMs: Date.now(),
+          },
+        }));
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Pose preprocessing failed.';
+        setPoseProcessingByVideo(prev => ({
+          ...prev,
+          [video.id]: {
+            status: 'error',
+            progress: 0,
+            etaSec: null,
+            error: message,
+            updatedAtMs: Date.now(),
+          },
+        }));
+        return false;
+      } finally {
+        delete poseProcessingPromisesRef.current[video.id];
+      }
+    })();
+
+    poseProcessingPromisesRef.current[video.id] = processPromise;
+    return processPromise;
+  }, [
+    buildPoseCacheKeyForVideo,
+    poseMinPoseDetectionConfidence,
+    poseMinPosePresenceConfidence,
+    poseMinTrackingConfidence,
+    poseModelVariant,
+    poseTargetFps,
+    poseUseYoloMultiPerson,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshPoseCacheStates = async () => {
+      const videos = library;
+      const existingReady = await Promise.all(videos.map(async (video) => {
+        const cacheKey = buildPoseCacheKeyForVideo(video);
+        const cacheId = buildPoseAnalysisCacheId(cacheKey);
+        const cached = await loadPoseAnalysisCache(cacheId);
+        return { videoId: video.id, ready: Boolean(cached && cached.frames.length > 0) };
+      }));
+
+      if (cancelled) return;
+
+      const videoIds = new Set(videos.map((video) => video.id));
+
+      setPoseProcessingByVideo(prev => {
+        const next: Record<string, PoseProcessingState> = {};
+        for (const { videoId, ready } of existingReady) {
+          const previous = prev[videoId];
+          if (previous?.status === 'processing') {
+            next[videoId] = previous;
+            continue;
+          }
+          if (ready) {
+            next[videoId] = {
+              status: 'ready',
+              progress: 1,
+              etaSec: 0,
+              error: null,
+              updatedAtMs: Date.now(),
+            };
+            continue;
+          }
+          if (previous?.status === 'error') {
+            next[videoId] = previous;
+            continue;
+          }
+          next[videoId] = createIdlePoseProcessingState();
+        }
+
+        for (const key of Object.keys(prev)) {
+          if (!videoIds.has(key) && prev[key]?.status === 'processing') {
+            next[key] = prev[key];
+          }
+        }
+
+        return next;
+      });
+    };
+
+    void refreshPoseCacheStates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [buildPoseCacheKeyForVideo, library]);
+
   const value = {
     library,
     loadLibrary,
     addVideoToLibrary,
     removeVideoFromLibrary,
+    poseProcessingByVideo,
+    getPoseProcessingState,
+    processPoseForVideo,
     slots,
     setSlot,
     layout,

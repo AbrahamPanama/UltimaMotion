@@ -14,14 +14,23 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAppContext } from '@/contexts/app-context';
 import { extractThumbnail } from '@/lib/video-utils';
-import { FilePlus, Trash2, PlusCircle, Video } from 'lucide-react';
+import { FilePlus, Trash2, PlusCircle, Video, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { VideoRecorder } from './video-recorder';
 import { Separator } from '../ui/separator';
 import { TrimDialog } from './trim-dialog';
 
 export function VideoLibrary() {
-  const { library, addVideoToLibrary, removeVideoFromLibrary, setSlot, slots } = useAppContext();
+  const {
+    library,
+    addVideoToLibrary,
+    removeVideoFromLibrary,
+    setSlot,
+    slots,
+    isPoseEnabled,
+    processPoseForVideo,
+    getPoseProcessingState,
+  } = useAppContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -79,7 +88,15 @@ export function VideoLibrary() {
     }
   };
 
-  const handleAddToGrid = (video: import('@/types').Video) => {
+  const handleAddToGrid = async (video: import('@/types').Video) => {
+    if (isPoseEnabled) {
+      const ok = await processPoseForVideo(video);
+      if (!ok) {
+        toast({ title: 'Pose preprocessing failed', description: 'Please retry processing from the library card.', variant: 'destructive' });
+        return;
+      }
+    }
+
     const emptySlotIndex = slots.findIndex(slot => slot === null);
     if (emptySlotIndex !== -1) {
       setSlot(emptySlotIndex, video);
@@ -87,6 +104,64 @@ export function VideoLibrary() {
     } else {
       toast({ title: 'Grid Full', variant: 'destructive' });
     }
+  };
+
+  const handleProcessPose = async (video: import('@/types').Video) => {
+    const ok = await processPoseForVideo(video);
+    if (ok) {
+      toast({ title: 'Pose Ready' });
+    } else {
+      toast({ title: 'Pose preprocessing failed', variant: 'destructive' });
+    }
+  };
+
+  const renderPoseStatus = (video: import('@/types').Video) => {
+    const state = getPoseProcessingState(video.id);
+
+    if (state.status === 'ready') {
+      return (
+        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-1 text-[11px] font-semibold text-emerald-400">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Pose Ready
+        </div>
+      );
+    }
+
+    if (state.status === 'processing') {
+      return (
+        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-1 text-[11px] font-semibold text-amber-300">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          {`Pose ${Math.round(state.progress * 100)}%${state.etaSec !== null ? ` · ${Math.max(0, Math.ceil(state.etaSec))}s` : ''}`}
+        </div>
+      );
+    }
+
+    if (state.status === 'error') {
+      return (
+        <button
+          className="mt-2 inline-flex items-center gap-1 rounded-md bg-destructive/20 px-2 py-1 text-[11px] font-semibold text-destructive hover:bg-destructive/30"
+          onClick={(e) => {
+            e.stopPropagation();
+            void handleProcessPose(video);
+          }}
+        >
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Retry Pose
+        </button>
+      );
+    }
+
+    return (
+      <button
+        className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary/20 px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/30"
+        onClick={(e) => {
+          e.stopPropagation();
+          void handleProcessPose(video);
+        }}
+      >
+        Process Pose
+      </button>
+    );
   };
 
   return (
@@ -114,7 +189,7 @@ export function VideoLibrary() {
                   <SidebarMenuItem key={video.id}>
                     <div
                       className="group/menu-item relative flex flex-col items-start p-2 rounded-md hover:bg-sidebar-accent w-full text-left cursor-pointer transition-colors"
-                      onClick={() => handleAddToGrid(video)}
+                      onClick={() => { void handleAddToGrid(video); }}
                     >
                       {/* Thumbnail Container */}
                       <div className="w-full aspect-video bg-black/10 rounded-md mb-2 overflow-hidden border border-border/20 relative shadow-sm">
@@ -134,7 +209,7 @@ export function VideoLibrary() {
                             size="icon"
                             variant="ghost"
                             className="h-6 w-6 text-white hover:text-white hover:bg-white/20"
-                            onClick={(e) => { e.stopPropagation(); handleAddToGrid(video); }}
+                            onClick={(e) => { e.stopPropagation(); void handleAddToGrid(video); }}
                             title="Add to Grid"
                           >
                             <PlusCircle className="h-4 w-4" />
@@ -163,6 +238,7 @@ export function VideoLibrary() {
                             Trimmed
                           </p>
                         )}
+                        {renderPoseStatus(video)}
                       </div>
                     </div>
                   </SidebarMenuItem>

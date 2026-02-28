@@ -255,7 +255,6 @@ interface PoseOverlayProps {
   targetFps: number;
   useExactFrameSync: boolean;
   useSmoothing: boolean;
-  usePreprocessCache: boolean;
   useYoloMultiPerson: boolean;
   minVisibility: number;
   showCoG: boolean;
@@ -481,7 +480,6 @@ export default function PoseOverlay({
   targetFps,
   useExactFrameSync,
   useSmoothing,
-  usePreprocessCache,
   useYoloMultiPerson,
   minVisibility,
   showCoG,
@@ -519,7 +517,6 @@ export default function PoseOverlay({
     targetFps,
     useExactFrameSync,
     useSmoothing,
-    usePreprocessCache,
     useYoloMultiPerson,
     minPoseDetectionConfidence,
     minPosePresenceConfidence,
@@ -549,22 +546,14 @@ export default function PoseOverlay({
     ? poses[selectedPoseIndex]
     : null;
   const isYoloModel = modelVariant.startsWith('yolo');
-  const resolvedTrimEndSec = Number.isFinite(trimEndSec)
-    ? Math.max(trimStartSec, trimEndSec ?? trimStartSec)
-    : Number.isFinite(videoElement?.duration)
-      ? Math.max(trimStartSec, videoElement?.duration ?? trimStartSec)
-      : trimStartSec;
-  const clipDurationSec = Math.max(0, resolvedTrimEndSec - trimStartSec);
-  const showSlowPreprocessWarning = (
-    isYoloModel &&
-    usePreprocessCache &&
-    clipDurationSec > 3 &&
-    (analysisStatus === 'analyzing' || status === 'loading')
-  );
   const analyzeEtaLabel = analysisEtaSec !== null
     ? `${Math.max(0, Math.ceil(analysisEtaSec))}s left`
     : null;
-  const analysisModeLabel = analysisStatus === 'analyzing'
+  const analysisModeLabel = analysisStatus === 'ready'
+    ? 'cached'
+    : analysisStatus === 'error' && isYoloModel
+      ? 'cache-miss'
+      : analysisStatus === 'analyzing'
     ? `analyzing ${Math.round(analysisProgress * 100)}%${analyzeEtaLabel ? ` · ${analyzeEtaLabel}` : ''}`
     : status === 'loading'
       ? 'loading'
@@ -1010,11 +999,6 @@ export default function PoseOverlay({
             <span>
               {`Pose ${analysisModeLabel} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount}`}
             </span>
-            {showSlowPreprocessWarning ? (
-              <div className="mt-1 text-[10px] font-medium text-amber-200/95">
-                {`Long clip (${clipDurationSec.toFixed(1)}s): preprocessing may take a while.`}
-              </div>
-            ) : null}
             {drawPose ? (
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-white/90">
                 {limbLegendItems.map((item) => {

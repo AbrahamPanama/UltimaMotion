@@ -20,11 +20,9 @@ import {
   buildPoseAnalysisCacheId,
   findClosestPoseFrame,
   loadPoseAnalysisCache,
-  savePoseAnalysisCache,
   type CachedPoseFrame,
   type PoseAnalysisCacheKey,
 } from '@/lib/pose/pose-analysis-cache';
-import { useToast } from '@/hooks/use-toast';
 
 type PoseStatus = 'idle' | 'loading' | 'ready' | 'error';
 type AnalysisStatus = 'idle' | 'analyzing' | 'ready' | 'error';
@@ -39,7 +37,6 @@ interface UsePoseLandmarksParams {
   targetFps: number;
   useExactFrameSync: boolean;
   useSmoothing: boolean;
-  usePreprocessCache: boolean;
   useYoloMultiPerson: boolean;
   minPoseDetectionConfidence: number;
   minPosePresenceConfidence: number;
@@ -128,13 +125,11 @@ export function usePoseLandmarks({
   targetFps,
   useExactFrameSync,
   useSmoothing,
-  usePreprocessCache,
   useYoloMultiPerson,
   minPoseDetectionConfidence,
   minPosePresenceConfidence,
   minTrackingConfidence,
 }: UsePoseLandmarksParams): UsePoseLandmarksResult {
-  const { toast } = useToast();
   const [status, setStatus] = useState<PoseStatus>('idle');
   const [poses, setPoses] = useState<NormalizedLandmark[][]>([]);
   const [worldPoses, setWorldPoses] = useState<NormalizedLandmark[][]>([]);
@@ -157,7 +152,6 @@ export function usePoseLandmarks({
   const runtimeRef = useRef<PoseRuntime | null>(null);
   const cachedFramesRef = useRef<CachedPoseFrame[] | null>(null);
   const cacheIdRef = useRef<string | null>(null);
-  const preprocessToastShownRef = useRef<Set<string>>(new Set());
 
   // ── Smoothing state (lives here, NOT in render) ──
   const filterStatesRef = useRef<LandmarkFilterState[]>([]);
@@ -221,7 +215,7 @@ export function usePoseLandmarks({
     const targetInterval = 1000 / Math.max(1, targetFps);
     const videoWithCallback = videoElement as VideoWithFrameCallback;
     const isYoloModel = modelVariant.startsWith('yolo');
-    const shouldUsePreprocess = Boolean(usePreprocessCache && isYoloModel && videoId);
+    const shouldUseCachedAnalysis = Boolean(isYoloModel && videoId);
 
     const trimStartMs = Math.max(0, Math.floor((Number.isFinite(trimStartSec) ? trimStartSec : 0) * 1000));
     const resolvedTrimEndSec = Number.isFinite(trimEndSec)
@@ -231,7 +225,7 @@ export function usePoseLandmarks({
         : trimStartSec);
     const trimEndMs = Math.max(trimStartMs, Math.floor(resolvedTrimEndSec * 1000));
 
-    const cacheKey: PoseAnalysisCacheKey | null = shouldUsePreprocess && videoId
+    const cacheKey: PoseAnalysisCacheKey | null = shouldUseCachedAnalysis && videoId
       ? {
         videoId,
         modelVariant,
@@ -242,56 +236,31 @@ export function usePoseLandmarks({
       }
       : null;
 
-    let analysisReady = !shouldUsePreprocess;
-    let analysisFailed = false;
+    let analysisReady = !shouldUseCachedAnalysis;
     let analysisPromise: Promise<void> | null = null;
 
     setStatus('loading');
     setError(null);
-    if (!shouldUsePreprocess) {
+    if (!shouldUseCachedAnalysis) {
       setAnalysisStatus('idle');
       setAnalysisProgress(0);
       setAnalysisEtaSec(null);
     }
 
-    const seekVideo = (timeSec: number) =>
-      new Promise<void>((resolve) => {
-        const clampedTime = Math.max(0, timeSec);
-        let resolved = false;
-        const cleanup = () => {
-          videoElement.removeEventListener('seeked', onSeeked);
-        };
-        const finish = () => {
-          if (resolved) return;
-          resolved = true;
-          cleanup();
-          resolve();
-        };
-        const onSeeked = () => finish();
-
-        videoElement.addEventListener('seeked', onSeeked);
-        videoElement.currentTime = clampedTime;
-
-        if (Math.abs(videoElement.currentTime - clampedTime) < 0.001) {
-          queueMicrotask(finish);
-          return;
-        }
-
-        window.setTimeout(finish, 250);
-      });
-
     const ensureCachedAnalysis = async () => {
-      if (!shouldUsePreprocess || !cacheKey) {
+      if (!shouldUseCachedAnalysis || !cacheKey) {
         setAnalysisStatus('idle');
         setAnalysisProgress(0);
         setAnalysisEtaSec(null);
         return;
       }
-      if (cacheIdRef.current === buildPoseAnalysisCacheId(cacheKey) && cachedFramesRef.current) {
+      const nextCacheId = buildPoseAnalysisCacheId(cacheKey);
+      if (cacheIdRef.current === nextCacheId && cachedFramesRef.current !== null) {
         analysisReady = true;
-        setAnalysisStatus('ready');
-        setAnalysisProgress(1);
-        setAnalysisEtaSec(null);
+        const hasFrames = cachedFramesRef.current.length > 0;
+        setAnalysisStatus(hasFrames ? 'ready' : 'error');
+        setAnalysisProgress(hasFrames ? 1 : 0);
+        setAnalysisEtaSec(hasFrames ? 0 : null);
         return;
       }
       if (analysisPromise) {
@@ -300,7 +269,7 @@ export function usePoseLandmarks({
       }
 
       analysisPromise = (async () => {
-        const cacheId = buildPoseAnalysisCacheId(cacheKey);
+        const cacheId = nextCacheId;
         cacheIdRef.current = cacheId;
         setAnalysisStatus('analyzing');
         setAnalysisProgress(0);
@@ -315,214 +284,18 @@ export function usePoseLandmarks({
           setAnalysisEtaSec(null);
           return;
         }
-
-        const clipDurationSec = Math.max(0, (trimEndMs - trimStartMs) / 1000);
-        if (clipDurationSec > 3 && !preprocessToastShownRef.current.has(cacheId)) {
-          preprocessToastShownRef.current.add(cacheId);
-          toast({
-            title: 'Pose preprocessing started',
-            description: `Long clip (${clipDurationSec.toFixed(1)}s). Processing may take a bit; overlay shows progress and seconds left.`,
-            duration: 5000,
-          });
-        }
-
-        const wasPaused = videoElement.paused;
-        const originalTime = Number.isFinite(videoElement.currentTime)
-          ? videoElement.currentTime
-          : trimStartMs / 1000;
-        const originalPlaybackRate = videoElement.playbackRate;
-
-        // Analysis pass: prefer decoded-frame traversal; fallback to deterministic seek stepping.
-        const analysisFrames: CachedPoseFrame[] = [];
-        let previousMediaMs = -1;
-        let analysisTimestampMs = 0;
-        const stepMs = Math.max(1, Math.round(1000 / Math.max(1, targetFps)));
-        const totalSteps = Math.max(1, Math.floor((trimEndMs - trimStartMs) / stepMs) + 1);
-        let processedSteps = 0;
-        const analysisStartMs = performance.now();
-
-        const appendAnalysisFrame = (currentMediaMs: number, detectedPoses: NormalizedLandmark[][]) => {
-          const previousFrame = analysisFrames[analysisFrames.length - 1];
-          if (previousFrame && previousFrame.timestampMs === currentMediaMs) {
-            previousFrame.poses = detectedPoses;
-          } else {
-            analysisFrames.push({
-              timestampMs: currentMediaMs,
-              poses: detectedPoses,
-            });
-          }
-        };
-
-        const updateAnalysisProgress = (currentMediaMs: number) => {
-          const progress = Math.max(
-            0,
-            Math.min(1, (currentMediaMs - trimStartMs) / Math.max(1, trimEndMs - trimStartMs))
-          );
-          setAnalysisProgress(progress);
-          if (progress <= 0.0001) {
-            setAnalysisEtaSec(null);
-            return;
-          }
-          const elapsedSec = Math.max(0.001, (performance.now() - analysisStartMs) / 1000);
-          const etaSec = Math.max(0, (elapsedSec * (1 - progress)) / progress);
-          setAnalysisEtaSec(etaSec);
-        };
-
-        const runStepSamplingAnalysis = async () => {
-          for (let mediaMs = trimStartMs; mediaMs <= trimEndMs; mediaMs += stepMs) {
-            if (cancelled) {
-              return;
-            }
-            const seekTimeSec = mediaMs / 1000;
-            await seekVideo(seekTimeSec);
-
-            const currentMediaMs = Math.max(trimStartMs, Math.floor(videoElement.currentTime * 1000));
-            const dtMs = previousMediaMs >= 0
-              ? Math.max(1, currentMediaMs - previousMediaMs)
-              : Math.max(1, stepMs);
-            analysisTimestampMs += dtMs;
-            previousMediaMs = currentMediaMs;
-
-            const result = await runtime.detectForVideo(videoElement, analysisTimestampMs, config);
-            const detectedPoses = result?.landmarks ?? [];
-            appendAnalysisFrame(currentMediaMs, detectedPoses);
-
-            processedSteps += 1;
-            const progress = Math.max(0, Math.min(1, processedSteps / totalSteps));
-            setAnalysisProgress(progress);
-            const elapsedSec = Math.max(0.001, (performance.now() - analysisStartMs) / 1000);
-            const etaSec = processedSteps > 0
-              ? Math.max(0, (elapsedSec / processedSteps) * (totalSteps - processedSteps))
-              : null;
-            setAnalysisEtaSec(etaSec);
-          }
-        };
-
-        const runFrameAccurateAnalysis = async () => {
-          if (!videoWithCallback.requestVideoFrameCallback) {
-            await runStepSamplingAnalysis();
-            return;
-          }
-
-          await seekVideo(trimStartMs / 1000);
-
-          await new Promise<void>((resolve, reject) => {
-            let settled = false;
-            let frameHandle: number | null = null;
-
-            const finish = (error?: unknown) => {
-              if (settled) return;
-              settled = true;
-              if (frameHandle !== null && videoWithCallback.cancelVideoFrameCallback) {
-                videoWithCallback.cancelVideoFrameCallback(frameHandle);
-              }
-              videoElement.pause();
-              if (error) {
-                reject(error);
-                return;
-              }
-              resolve();
-            };
-
-            const queueNextFrame = () => {
-              if (settled || cancelled) {
-                finish();
-                return;
-              }
-              if (!videoWithCallback.requestVideoFrameCallback) {
-                finish(new Error('requestVideoFrameCallback is unavailable during frame-accurate preprocessing.'));
-                return;
-              }
-              frameHandle = videoWithCallback.requestVideoFrameCallback(onFrame);
-              videoElement.play().catch((playError) => {
-                finish(playError);
-              });
-            };
-
-            const onFrame: VideoFrameCallback = async (_now, metadata) => {
-              if (settled || cancelled) {
-                finish();
-                return;
-              }
-
-              const currentMediaMs = Math.max(trimStartMs, Math.floor(metadata.mediaTime * 1000));
-              if (currentMediaMs < trimStartMs) {
-                queueNextFrame();
-                return;
-              }
-              if (currentMediaMs > trimEndMs + 1) {
-                finish();
-                return;
-              }
-              if (previousMediaMs >= 0 && currentMediaMs <= previousMediaMs) {
-                if (currentMediaMs >= trimEndMs) {
-                  finish();
-                } else {
-                  queueNextFrame();
-                }
-                return;
-              }
-
-              const dtMs = previousMediaMs >= 0
-                ? Math.max(1, currentMediaMs - previousMediaMs)
-                : Math.max(1, stepMs);
-              analysisTimestampMs += dtMs;
-              previousMediaMs = currentMediaMs;
-
-              videoElement.pause();
-
-              try {
-                const result = await runtime.detectForVideo(videoElement, analysisTimestampMs, config);
-                const detectedPoses = result?.landmarks ?? [];
-                appendAnalysisFrame(currentMediaMs, detectedPoses);
-                updateAnalysisProgress(currentMediaMs);
-              } catch (frameError) {
-                finish(frameError);
-                return;
-              }
-
-              if (currentMediaMs >= trimEndMs) {
-                finish();
-                return;
-              }
-
-              queueNextFrame();
-            };
-
-            queueNextFrame();
-          });
-        };
-
-        try {
-          videoElement.pause();
-          videoElement.playbackRate = 1;
-          runtime.resetTracker();
-          await runFrameAccurateAnalysis();
-
-          if (analysisFrames.length === 0) {
-            throw new Error('Pose preprocessing produced no frames.');
-          }
-
-          await savePoseAnalysisCache(cacheKey, analysisFrames);
-          cachedFramesRef.current = analysisFrames;
-          analysisReady = true;
-          setAnalysisStatus('ready');
-          setAnalysisProgress(1);
-          setAnalysisEtaSec(0);
-        } finally {
-          videoElement.playbackRate = originalPlaybackRate;
-          await seekVideo(originalTime);
-          if (!wasPaused) {
-            videoElement.play().catch(() => { });
-          }
-        }
+        cachedFramesRef.current = null;
+        analysisReady = true;
+        cachedFramesRef.current = [];
+        setAnalysisStatus('error');
+        setAnalysisProgress(0);
+        setAnalysisEtaSec(null);
       })();
 
       try {
         await analysisPromise;
       } catch (analysisError) {
-        console.warn('[PoseAnalysis] Falling back to live inference after preprocessing failure.', analysisError);
-        analysisFailed = true;
+        console.warn('[PoseAnalysis] Cached pose load failed.', analysisError);
         cachedFramesRef.current = null;
         setAnalysisStatus('error');
         setAnalysisProgress(0);
@@ -602,7 +375,7 @@ export function usePoseLandmarks({
         let detectedPoses: NormalizedLandmark[][] = [];
         let detectedWorldPoses: NormalizedLandmark[][] = [];
 
-        if (shouldUsePreprocess && !analysisFailed) {
+        if (shouldUseCachedAnalysis) {
           if (!analysisReady) {
             await ensureCachedAnalysis();
           }
@@ -613,20 +386,24 @@ export function usePoseLandmarks({
             const cachedFrame = findClosestPoseFrame(cachedFrames, currentMediaTimeMs);
             detectedPoses = cachedFrame?.poses ?? [];
             detectedWorldPoses = [];
-          } else {
-            analysisFailed = true;
+            setAnalysisStatus('ready');
+            setAnalysisProgress(1);
+            setAnalysisEtaSec(0);
+          } else if (modelVariant.startsWith('yolo')) {
+            setStatus('error');
+            setError('Pose cache not found. Process this clip from the Library first.');
+            setPoses([]);
+            setWorldPoses([]);
+            setPoseCount(0);
+            setInferenceFps(0);
+            return;
           }
         }
 
-        if (!shouldUsePreprocess || analysisFailed) {
-          if (shouldUsePreprocess && analysisFailed) {
-            setAnalysisStatus('error');
-            setAnalysisEtaSec(null);
-          } else {
-            setAnalysisStatus('idle');
-            setAnalysisProgress(0);
-            setAnalysisEtaSec(null);
-          }
+        if (!shouldUseCachedAnalysis) {
+          setAnalysisStatus('idle');
+          setAnalysisProgress(0);
+          setAnalysisEtaSec(null);
           const result = await runtime.detectForVideo(videoElement, timestampMs, config);
           detectedPoses = result?.landmarks ?? [];
           detectedWorldPoses = result?.worldLandmarks ?? [];
@@ -753,12 +530,10 @@ export function usePoseLandmarks({
     trimStartSec,
     targetFps,
     useExactFrameSync,
-    usePreprocessCache,
     useSmoothing,
     useYoloMultiPerson,
     videoId,
     videoElement,
-    toast,
   ]);
 
   return useMemo(

@@ -2,14 +2,23 @@
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAppContext } from '@/contexts/app-context';
-import { FilePlus, Trash2, PlusCircle, Video, ChevronUp, ChevronDown } from 'lucide-react';
+import { FilePlus, Trash2, PlusCircle, Video, ChevronUp, ChevronDown, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { VideoRecorder } from './video-recorder';
 import { TrimDialog } from './trim-dialog';
 import { extractThumbnail } from '@/lib/video-utils';
 
 export function MobileLibrary() {
-  const { library, addVideoToLibrary, removeVideoFromLibrary, setSlot, slots } = useAppContext();
+  const {
+    library,
+    addVideoToLibrary,
+    removeVideoFromLibrary,
+    setSlot,
+    slots,
+    isPoseEnabled,
+    processPoseForVideo,
+    getPoseProcessingState,
+  } = useAppContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -66,7 +75,15 @@ export function MobileLibrary() {
     }
   };
 
-  const handleAddToGrid = (video: import('@/types').Video) => {
+  const handleAddToGrid = async (video: import('@/types').Video) => {
+    if (isPoseEnabled) {
+      const ok = await processPoseForVideo(video);
+      if (!ok) {
+        toast({ title: 'Pose preprocessing failed', description: 'Please retry from the library card.', variant: 'destructive' });
+        return;
+      }
+    }
+
     const emptySlotIndex = slots.findIndex((slot) => slot === null);
     if (emptySlotIndex !== -1) {
       setSlot(emptySlotIndex, video);
@@ -74,6 +91,64 @@ export function MobileLibrary() {
     } else {
       toast({ title: 'Grid Full', variant: 'destructive' });
     }
+  };
+
+  const handleProcessPose = async (video: import('@/types').Video) => {
+    const ok = await processPoseForVideo(video);
+    if (ok) {
+      toast({ title: 'Pose Ready' });
+    } else {
+      toast({ title: 'Pose preprocessing failed', variant: 'destructive' });
+    }
+  };
+
+  const renderPoseStatus = (video: import('@/types').Video) => {
+    const state = getPoseProcessingState(video.id);
+
+    if (state.status === 'ready') {
+      return (
+        <div className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300">
+          <CheckCircle2 className="h-3 w-3" />
+          Ready
+        </div>
+      );
+    }
+
+    if (state.status === 'processing') {
+      return (
+        <div className="mt-1 inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {`${Math.round(state.progress * 100)}%`}
+        </div>
+      );
+    }
+
+    if (state.status === 'error') {
+      return (
+        <button
+          className="mt-1 inline-flex items-center gap-1 rounded bg-destructive/20 px-1.5 py-0.5 text-[9px] font-semibold text-destructive"
+          onClick={(e) => {
+            e.stopPropagation();
+            void handleProcessPose(video);
+          }}
+        >
+          <AlertTriangle className="h-3 w-3" />
+          Retry Pose
+        </button>
+      );
+    }
+
+    return (
+      <button
+        className="mt-1 inline-flex items-center rounded bg-primary/20 px-1.5 py-0.5 text-[9px] font-semibold text-primary"
+        onClick={(e) => {
+          e.stopPropagation();
+          void handleProcessPose(video);
+        }}
+      >
+        Process Pose
+      </button>
+    );
   };
 
   return (
@@ -127,7 +202,7 @@ export function MobileLibrary() {
                 <div
                   key={video.id}
                   className="group relative flex-shrink-0 w-[156px] snap-start cursor-pointer"
-                  onClick={() => handleAddToGrid(video)}
+                  onClick={() => { void handleAddToGrid(video); }}
                 >
                   {/* Thumbnail */}
                   <div className="w-full aspect-video bg-black/10 rounded-lg overflow-hidden border border-border/30 relative shadow-sm">
@@ -154,7 +229,7 @@ export function MobileLibrary() {
                         className="h-7 w-7 bg-black/60 text-white hover:text-white hover:bg-black/80 rounded"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleAddToGrid(video);
+                          void handleAddToGrid(video);
                         }}
                         title="Add to Grid"
                       >
@@ -189,6 +264,9 @@ export function MobileLibrary() {
                       Trimmed
                     </p>
                   )}
+                  <div className="px-0.5">
+                    {renderPoseStatus(video)}
+                  </div>
                 </div>
               ))
             ) : (

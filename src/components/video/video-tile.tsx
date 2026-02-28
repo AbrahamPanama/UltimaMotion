@@ -24,6 +24,7 @@ interface VideoTileProps {
 }
 
 const DEFAULT_POSITION = { x: 0, y: 0 };
+const SYNC_OFFSET_SNAP_SEC = 1 / 120;
 
 export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const {
@@ -53,13 +54,13 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     isSyncDrawingsEnabled,
     // Pose overlay
     isPoseEnabled,
+    processPoseForVideo,
     poseAnalyzeScope,
     poseModelVariant,
     poseMinVisibility,
     poseTargetFps,
     poseUseExactFrameSync,
     poseUseSmoothing,
-    poseUsePreprocessCache,
     poseUseYoloMultiPerson,
     poseShowCoG,
     poseShowCoGCharts,
@@ -93,6 +94,9 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
   const effectiveDrawingId = isSyncDrawingsEnabled ? SYNC_DRAWINGS_KEY : (video?.id ?? '');
   const currentDrawings = video ? (drawings[effectiveDrawingId] || []) : [];
   const shouldAnalyzePose = Boolean(video) && isPoseEnabled && (poseAnalyzeScope === 'all-visible' || isActive);
+  const videoId = video?.id ?? null;
+  const videoTrimStart = video?.trimStart ?? 0;
+  const videoTrimEnd = video?.trimEnd ?? null;
 
   // Handle ref assignment and cleanup
   useEffect(() => {
@@ -234,13 +238,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     videoElement.addEventListener('play', handlePlay);
     videoElement.addEventListener('pause', handlePause);
 
-    // Initialize at trim start
-    videoElement.currentTime = trimStart;
-    setCurrentTime(0);
-    if (videoElement.duration) {
-      const trimEnd = video.trimEnd || videoElement.duration;
-      setDuration(Math.max(0, trimEnd - trimStart));
-    }
+    handleDurationChange();
     setIsPlaying(!videoElement.paused);
 
     return () => {
@@ -251,6 +249,20 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
       videoElement.removeEventListener('pause', handlePause);
     };
   }, [video, isLoopEnabled, isSyncEnabled]);
+
+  // Initialize timeline position only when the loaded clip/trim actually changes.
+  useEffect(() => {
+    const videoElement = videoRef.current;
+    if (!videoElement || !videoId) return;
+
+    const trimStart = videoTrimStart;
+    const trimEnd = videoTrimEnd ?? videoElement.duration;
+    const trimLength = Math.max(0, trimEnd - trimStart);
+
+    videoElement.currentTime = trimStart;
+    setCurrentTime(0);
+    setDuration(trimLength);
+  }, [videoId, videoTrimEnd, videoTrimStart]);
 
   const handlePlayPause = () => {
     const videoElement = videoRef.current;
@@ -281,7 +293,14 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     setPlaybackRate(rate);
   };
 
-  const handleSelectVideo = (selectedVideo: Video) => {
+  const handleSelectVideo = async (selectedVideo: Video) => {
+    if (isPoseEnabled) {
+      const ok = await processPoseForVideo(selectedVideo);
+      if (!ok) {
+        toast({ title: 'Pose preprocessing failed', description: 'Please retry from the library.', variant: 'destructive' });
+        return;
+      }
+    }
     setSlot(index, selectedVideo);
     toast({ title: 'Video Added' });
   };
@@ -299,11 +318,15 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
       const start = video?.trimStart ?? 0;
       const trimEnd = video?.trimEnd ?? videoElement.duration;
       const end = Number.isFinite(trimEnd) ? Math.max(start, trimEnd) : start;
+      const trimLength = Math.max(0, end - start);
       const clampTime = (time: number) => Math.max(start, Math.min(time, end));
+      const snapOffset = (value: number) =>
+        Math.round(value / SYNC_OFFSET_SNAP_SEC) * SYNC_OFFSET_SNAP_SEC;
 
       if (isSyncEnabled) {
         const currentOffset = syncOffsets[index] ?? 0;
-        const nextOffset = clampTime(start + currentOffset + seconds) - start;
+        const boundedOffset = Math.max(-trimLength, Math.min(currentOffset + seconds, trimLength));
+        const nextOffset = snapOffset(boundedOffset);
         updateSyncOffset(index, nextOffset - currentOffset);
         videoElement.currentTime = clampTime(videoElement.currentTime + seconds);
       } else {
@@ -495,7 +518,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
         <DropdownMenuContent align="center" className="w-56">
           {library.length > 0 ? (
             library.map(libVideo => (
-              <DropdownMenuItem key={libVideo.id} onClick={() => handleSelectVideo(libVideo)} className="cursor-pointer">
+              <DropdownMenuItem key={libVideo.id} onClick={() => { void handleSelectVideo(libVideo); }} className="cursor-pointer">
                 <span className="truncate">{libVideo.name}</span>
               </DropdownMenuItem>
             ))
@@ -567,7 +590,6 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
             targetFps={poseTargetFps}
             useExactFrameSync={poseUseExactFrameSync}
             useSmoothing={poseUseSmoothing}
-            usePreprocessCache={poseUsePreprocessCache}
             useYoloMultiPerson={poseUseYoloMultiPerson}
             minVisibility={poseMinVisibility}
             showCoG={poseShowCoG}

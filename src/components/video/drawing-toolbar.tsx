@@ -19,7 +19,7 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { useAppContext } from '@/contexts/app-context';
 import { cn } from '@/lib/utils';
-import type { DrawingType, PoseModelVariant, PoseAnalyzeScope } from '@/types';
+import type { DrawingType, PoseAnalyzeScope } from '@/types';
 
 const SYNC_DRAWINGS_KEY = '__sync__';
 
@@ -52,20 +52,12 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         // Pose overlay
         isPoseEnabled,
         togglePose,
-        poseModelVariant,
-        setPoseModelVariant,
         poseAnalyzeScope,
         setPoseAnalyzeScope,
         poseMinVisibility,
         setPoseMinVisibility,
-        poseUseExactFrameSync,
-        setPoseUseExactFrameSync,
         poseUseSmoothing,
         setPoseUseSmoothing,
-        poseUsePreprocessCache,
-        setPoseUsePreprocessCache,
-        poseUseYoloMultiPerson,
-        setPoseUseYoloMultiPerson,
         poseShowCoG,
         setPoseShowCoG,
         poseShowCoGCharts,
@@ -76,14 +68,6 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         setPoseShowBodyLean,
         poseShowJumpHeight,
         setPoseShowJumpHeight,
-        poseTargetFps,
-        setPoseTargetFps,
-        poseMinPoseDetectionConfidence,
-        setPoseMinPoseDetectionConfidence,
-        poseMinPosePresenceConfidence,
-        setPoseMinPosePresenceConfidence,
-        poseMinTrackingConfidence,
-        setPoseMinTrackingConfidence,
         isSyncDrawingsEnabled,
         toggleSyncDrawings,
         // View controls
@@ -102,8 +86,6 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
     const hasAnyVideo = slots.some((slot) => slot !== null);
     const canEdit = isDrawingEnabled && hasActiveVideo;
     const canPose = hasAnyVideo;
-
-    const isYoloModel = poseModelVariant.startsWith('yolo');
 
     const handleClear = () => {
         if (activeVideo) {
@@ -342,47 +324,17 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                         </div>
 
                         <div className="p-3 space-y-3 max-h-[70vh] overflow-y-auto">
-                            {/* Model + Scope */}
-                            <div className="grid grid-cols-2 gap-2">
-                                <div className="space-y-1.5">
-                                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Model</p>
-                                    <Select value={poseModelVariant} onValueChange={(v) => setPoseModelVariant(v as PoseModelVariant)}>
-                                        <SelectTrigger className="h-8 text-xs">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="yolo26-nano">YOLO26 Nano</SelectItem>
-                                            <SelectItem value="yolo26-small">YOLO26 Small</SelectItem>
-                                            <SelectItem value="yolo26-medium">YOLO26 Medium</SelectItem>
-                                            <SelectItem value="yolo26-large">YOLO26 Large</SelectItem>
-                                            <SelectItem value="yolo26-xlarge">YOLO26 X-Large</SelectItem>
-                                            <SelectItem value="lite">MP Lite</SelectItem>
-                                            <SelectItem value="full">MP Full</SelectItem>
-                                            <SelectItem value="heavy">MP Heavy</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-1.5">
-                                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Scope</p>
-                                    <Select value={poseAnalyzeScope} onValueChange={(v) => setPoseAnalyzeScope(v as PoseAnalyzeScope)}>
-                                        <SelectTrigger className="h-8 text-xs">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="active-tile">Active tile</SelectItem>
-                                            <SelectItem value="all-visible">All tiles</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-
-                            {/* Inference FPS slider */}
                             <div className="space-y-1.5">
-                                <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                    <span>Inference FPS</span>
-                                    <span>{poseTargetFps}</span>
-                                </div>
-                                <Slider value={[poseTargetFps]} min={5} max={60} step={1} onValueChange={([v]) => setPoseTargetFps(v)} />
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Scope</p>
+                                <Select value={poseAnalyzeScope} onValueChange={(v) => setPoseAnalyzeScope(v as PoseAnalyzeScope)}>
+                                    <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="active-tile">Active tile</SelectItem>
+                                        <SelectItem value="all-visible">All tiles</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
 
                             <div className="border-t border-border/50 pt-2 space-y-1.5">
@@ -390,31 +342,22 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                 <div className="flex items-center justify-between rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1.5">
                                     <div>
                                         <p className="text-[11px] font-medium text-foreground">Temporal Smoothing</p>
-                                        <p className="text-[10px] text-muted-foreground/80">1€ filter to reduce landmark jitter (recommended for YOLO)</p>
+                                        <p className="text-[10px] text-muted-foreground/80">Apply 1€ smoothing to reduce frame-to-frame jitter</p>
                                     </div>
                                     <Switch checked={poseUseSmoothing} onCheckedChange={setPoseUseSmoothing} />
                                 </div>
                             </div>
 
-                            {isYoloModel && (
-                                <div className="border-t border-border/50 pt-2 space-y-1.5">
-                                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">YOLO</p>
-                                    <div className="flex items-center justify-between rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1.5">
-                                        <div>
-                                            <p className="text-[11px] font-medium text-foreground">Preprocess Clip</p>
-                                            <p className="text-[10px] text-muted-foreground/80">Analyze and cache poses frame-by-frame before review playback</p>
-                                        </div>
-                                        <Switch checked={poseUsePreprocessCache} onCheckedChange={setPoseUsePreprocessCache} />
+                            <div className="border-t border-border/50 pt-2 space-y-1.5">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Rendering</p>
+                                <div className="space-y-1">
+                                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                        <span>Min Visibility</span>
+                                        <span>{poseMinVisibility.toFixed(2)}</span>
                                     </div>
-                                    <div className="flex items-center justify-between rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1.5">
-                                        <div>
-                                            <p className="text-[11px] font-medium text-foreground">Multi-Person Detection</p>
-                                            <p className="text-[10px] text-muted-foreground/80">Decode and render up to 4 people instead of only the top subject</p>
-                                        </div>
-                                        <Switch checked={poseUseYoloMultiPerson} onCheckedChange={setPoseUseYoloMultiPerson} />
-                                    </div>
+                                    <Slider value={[poseMinVisibility]} min={0} max={1} step={0.05} onValueChange={([v]) => setPoseMinVisibility(v)} />
                                 </div>
-                            )}
+                            </div>
 
                             <div className="border-t border-border/50 pt-2 space-y-1.5">
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Analytics</p>
@@ -434,46 +377,6 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                     </div>
                                 ))}
                             </div>
-
-                            {/* MediaPipe-only settings */}
-                            {!isYoloModel && (
-                                <>
-                                    <div className="border-t border-border/50 pt-2 space-y-1.5">
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Confidence</p>
-                                        <div className="space-y-2">
-                                            {[
-                                                { label: 'Detection', value: poseMinPoseDetectionConfidence, set: setPoseMinPoseDetectionConfidence },
-                                                { label: 'Presence', value: poseMinPosePresenceConfidence, set: setPoseMinPosePresenceConfidence },
-                                                { label: 'Tracking', value: poseMinTrackingConfidence, set: setPoseMinTrackingConfidence },
-                                                { label: 'Min Visibility', value: poseMinVisibility, set: setPoseMinVisibility },
-                                            ].map(({ label, value, set }) => (
-                                                <div key={label} className="space-y-1">
-                                                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                                                        <span>{label}</span>
-                                                        <span>{value.toFixed(2)}</span>
-                                                    </div>
-                                                    <Slider value={[value]} min={0} max={1} step={0.05} onValueChange={([v]) => set(v)} />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    <div className="border-t border-border/50 pt-2 space-y-1.5">
-                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Filters</p>
-                                        {[
-                                            { label: 'Exact Frame Sync', desc: 'Prevents duplicate frames', value: poseUseExactFrameSync, set: setPoseUseExactFrameSync },
-                                        ].map(({ label, desc, value, set }) => (
-                                            <div key={label} className="flex items-center justify-between rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1.5">
-                                                <div>
-                                                    <p className="text-[11px] font-medium text-foreground">{label}</p>
-                                                    <p className="text-[10px] text-muted-foreground/80">{desc}</p>
-                                                </div>
-                                                <Switch checked={value} onCheckedChange={set} />
-                                            </div>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
                         </div>
                     </PopoverContent>
                 </Popover>
