@@ -54,7 +54,8 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     isSyncDrawingsEnabled,
     // Pose overlay
     isPoseEnabled,
-    processPoseForVideo,
+    getPoseProcessingState,
+    setPoseModelVariant,
     poseAnalyzeScope,
     poseModelVariant,
     poseMinVisibility,
@@ -295,11 +296,20 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
 
   const handleSelectVideo = async (selectedVideo: Video) => {
     if (isPoseEnabled) {
-      const ok = await processPoseForVideo(selectedVideo);
-      if (!ok) {
-        toast({ title: 'Pose preprocessing failed', description: 'Please retry from the library.', variant: 'destructive' });
+      const poseState = getPoseProcessingState(selectedVideo.id);
+      if (poseState.status !== 'ready' || !poseState.modelVariant) {
+        toast({ title: 'Pose not ready', description: 'Process this clip from the library first.', variant: 'destructive' });
         return;
       }
+      setPoseModelVariant(poseState.modelVariant);
+    }
+    const existingSlotIndex = slots.findIndex(
+      (slot, slotIndex) => slotIndex !== index && slot?.id === selectedVideo.id
+    );
+    if (existingSlotIndex !== -1) {
+      setActiveTileIndex(existingSlotIndex);
+      toast({ title: 'Video already in grid' });
+      return;
     }
     setSlot(index, selectedVideo);
     toast({ title: 'Video Added' });

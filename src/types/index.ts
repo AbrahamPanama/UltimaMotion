@@ -8,6 +8,7 @@ export type Video = {
   trimStart?: number; // New: Start time in seconds
   trimEnd?: number;   // New: End time in seconds
   thumbnail?: string; // New: Base64 data URL for thumbnail
+  isFavorite?: boolean;
 };
 
 export type DrawingType = 'free' | 'line' | 'arrow' | 'angle' | 'rectangle' | 'circle' | 'text';

@@ -85,8 +85,8 @@ export const getAllVideos = (): Promise<Omit<Video, 'url'>[]> => {
     const request = store.getAll();
 
     request.onsuccess = () => {
-        const sortedVideos = request.result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-        resolve(sortedVideos);
+      const sortedVideos = request.result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      resolve(sortedVideos);
     };
     request.onerror = () => {
       console.error("Error getting videos:", request.error);
@@ -173,6 +173,54 @@ export const deletePoseAnalysis = (id: string): Promise<void> => {
     request.onerror = () => {
       console.error("Error deleting pose analysis:", request.error);
       reject('Error deleting pose analysis');
+    };
+  });
+};
+
+export const getPoseAnalysisIdsByVideoId = (videoId: string): Promise<string[]> => {
+  return new Promise(async (resolve, reject) => {
+    const db = await initDB();
+    const transaction = db.transaction(POSE_ANALYSIS_STORE_NAME, 'readonly');
+    const store = transaction.objectStore(POSE_ANALYSIS_STORE_NAME);
+    const index = store.index('videoId');
+    const request = index.getAllKeys(IDBKeyRange.only(videoId));
+
+    request.onsuccess = () => {
+      const keys = (request.result ?? []).map((key) => String(key));
+      resolve(keys);
+    };
+    request.onerror = () => {
+      console.error("Error reading pose analysis ids by videoId:", request.error);
+      reject('Error reading pose analysis ids by videoId');
+    };
+  });
+};
+
+export const toggleVideoFavorite = (id: string): Promise<boolean> => {
+  return new Promise(async (resolve, reject) => {
+    const db = await initDB();
+    const transaction = db.transaction(VIDEO_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(VIDEO_STORE_NAME);
+    const getRequest = store.get(id);
+
+    getRequest.onsuccess = () => {
+      const record = getRequest.result;
+      if (!record) {
+        reject('Video not found');
+        return;
+      }
+      const newValue = !record.isFavorite;
+      record.isFavorite = newValue;
+      const putRequest = store.put(record);
+      putRequest.onsuccess = () => resolve(newValue);
+      putRequest.onerror = () => {
+        console.error("Error toggling favorite:", putRequest.error);
+        reject('Error toggling favorite');
+      };
+    };
+    getRequest.onerror = () => {
+      console.error("Error reading video for favorite toggle:", getRequest.error);
+      reject('Error reading video');
     };
   });
 };

@@ -3,6 +3,7 @@
 import { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppContext } from '@/contexts/app-context';
 import VideoTile from './video-tile';
+import OverlayCompareTile from './overlay-compare-tile';
 import { cn } from '@/lib/utils';
 import PlayerControls from './player-controls';
 import type { Video } from '@/types';
@@ -49,11 +50,20 @@ const seekVideoToTime = (video: HTMLVideoElement, targetTime: number) =>
 export default function VideoGrid() {
   const {
     layout,
+    compareViewMode,
+    canUseOverlayComparison,
+    overlayOpacity,
+    overlayBlendMode,
+    overlayTopColorFilter,
+    overlayTopBlackAndWhite,
     slots,
+    setSlot,
     activeTileIndex,
     isSyncEnabled,
+    isPortraitMode,
     videoRefs,
     isLoopEnabled,
+    isMuted,
     syncOffsets,
     playbackRate,
     setPlaybackRate,
@@ -68,6 +78,11 @@ export default function VideoGrid() {
   const isPlayingRef = useRef(false);
   const syncBusyRef = useRef(false);
   const pendingSyncRef = useRef<{ relativeTime: number; resume: boolean } | null>(null);
+  const overlayEntries = slots
+    .map((slot, index) => ({ slot, index }))
+    .filter((entry): entry is { slot: Video; index: number } => entry.slot !== null);
+  const canRenderOverlay = compareViewMode === 'overlay' && canUseOverlayComparison && overlayEntries.length === 2;
+  const isSharedPlaybackMode = isSyncEnabled || canRenderOverlay;
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -252,7 +267,7 @@ export default function VideoGrid() {
   ]);
 
   useEffect(() => {
-    if (isSyncEnabled && isPlaying) {
+    if (isSharedPlaybackMode && isPlaying) {
       rafRef.current = requestAnimationFrame(tick);
     } else if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
@@ -265,12 +280,12 @@ export default function VideoGrid() {
         rafRef.current = null;
       }
     };
-  }, [isSyncEnabled, isPlaying, tick]);
+  }, [isSharedPlaybackMode, isPlaying, tick]);
 
   useEffect(() => {
-    if (!isSyncEnabled) return;
+    if (!isSharedPlaybackMode) return;
     setDuration(getSyncDuration());
-  }, [isSyncEnabled, getSyncDuration, slots]);
+  }, [getSyncDuration, isSharedPlaybackMode, slots]);
 
   const handlePlayPause = () => {
     const active = getActiveVideos();
@@ -321,23 +336,44 @@ export default function VideoGrid() {
     2: isMobile ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2',
     4: isMobile ? 'grid-cols-1' : 'grid-cols-2',
   };
+  const gridClassName = canRenderOverlay ? 'grid-cols-1' : gridClasses[effectiveLayout];
 
   return (
     <div className="flex h-full flex-1 gap-4 overflow-hidden">
       <div className="flex h-full flex-1 flex-col gap-4 overflow-hidden">
-        <div className={cn('grid flex-1 min-h-0 auto-rows-[1fr] gap-4', gridClasses[effectiveLayout])}>
-          {slots.slice(0, effectiveLayout).map((video, index) => (
-            <div key={index} className="flex min-h-0 min-w-0 items-center justify-center overflow-hidden">
-              <VideoTile
-                video={video}
-                index={index}
-                isActive={activeTileIndex === index}
+        <div className={cn('grid flex-1 min-h-0 auto-rows-[1fr] gap-4', gridClassName)}>
+          {canRenderOverlay ? (
+            <div className="flex min-h-0 min-w-0 items-center justify-center overflow-hidden">
+              <OverlayCompareTile
+                baseVideo={overlayEntries[0].slot}
+                topVideo={overlayEntries[1].slot}
+                baseIndex={overlayEntries[0].index}
+                topIndex={overlayEntries[1].index}
+                videoRefs={videoRefs}
+                isPortraitMode={isPortraitMode}
+                isMuted={isMuted}
+                overlayOpacity={overlayOpacity}
+                overlayBlendMode={overlayBlendMode}
+                overlayTopColorFilter={overlayTopColorFilter}
+                overlayTopBlackAndWhite={overlayTopBlackAndWhite}
+                onRemoveBase={() => setSlot(overlayEntries[0].index, null)}
+                onRemoveTop={() => setSlot(overlayEntries[1].index, null)}
               />
             </div>
-          ))}
+          ) : (
+            slots.slice(0, effectiveLayout).map((video, index) => (
+              <div key={index} className="flex min-h-0 min-w-0 items-center justify-center overflow-hidden">
+                <VideoTile
+                  video={video}
+                  index={index}
+                  isActive={activeTileIndex === index}
+                />
+              </div>
+            ))
+          )}
         </div>
 
-        {isSyncEnabled && (
+        {isSharedPlaybackMode && (
           <div className="mt-auto flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm">
             <PlayerControls
               isPlaying={isPlaying}

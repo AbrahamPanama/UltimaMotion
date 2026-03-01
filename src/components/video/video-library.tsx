@@ -14,13 +14,22 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAppContext } from '@/contexts/app-context';
 import { extractThumbnail } from '@/lib/video-utils';
-import { FilePlus, Trash2, PlusCircle, Video, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { getPoseProcessModelLabel, POSE_PROCESS_MODEL_OPTIONS } from '@/lib/pose/pose-model-label';
+import { FilePlus, Trash2, PlusCircle, Video, Loader2, CheckCircle2, AlertTriangle, Square, Star } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { VideoRecorder } from './video-recorder';
 import { Separator } from '../ui/separator';
 import { TrimDialog } from './trim-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import type { PoseModelVariant } from '@/types';
 
 export function VideoLibrary() {
+  const DUPLICATE_ADD_WINDOW_MS = 450;
   const {
     library,
     addVideoToLibrary,
@@ -30,8 +39,12 @@ export function VideoLibrary() {
     isPoseEnabled,
     processPoseForVideo,
     getPoseProcessingState,
+    setPoseModelVariant,
+    cancelPoseProcessing,
+    toggleFavorite,
   } = useAppContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastAddActionRef = useRef<{ videoId: string; atMs: number } | null>(null);
   const { toast } = useToast();
 
   // State for Trim Dialog
@@ -89,12 +102,28 @@ export function VideoLibrary() {
   };
 
   const handleAddToGrid = async (video: import('@/types').Video) => {
+    const nowMs = performance.now();
+    const lastAdd = lastAddActionRef.current;
+    if (lastAdd && lastAdd.videoId === video.id && (nowMs - lastAdd.atMs) < DUPLICATE_ADD_WINDOW_MS) {
+      return;
+    }
+    lastAddActionRef.current = { videoId: video.id, atMs: nowMs };
+
     if (isPoseEnabled) {
-      const ok = await processPoseForVideo(video);
-      if (!ok) {
-        toast({ title: 'Pose preprocessing failed', description: 'Please retry processing from the library card.', variant: 'destructive' });
+      const poseState = getPoseProcessingState(video.id);
+      if (poseState.status !== 'ready' || !poseState.modelVariant) {
+        toast({ title: 'Pose not ready', description: 'Process this clip from the library before loading it.', variant: 'destructive' });
         return;
       }
+      setPoseModelVariant(poseState.modelVariant);
+    }
+
+    const existingSlotIndex = slots.findIndex((slot) => slot?.id === video.id);
+    if (existingSlotIndex !== -1) {
+      // Re-assert slot placement to heal stale layout state from previous sessions.
+      setSlot(existingSlotIndex, video);
+      toast({ title: 'Video already in grid' });
+      return;
     }
 
     const emptySlotIndex = slots.findIndex(slot => slot === null);
@@ -106,12 +135,16 @@ export function VideoLibrary() {
     }
   };
 
-  const handleProcessPose = async (video: import('@/types').Video) => {
-    const ok = await processPoseForVideo(video);
+  const handleProcessPose = async (video: import('@/types').Video, modelVariant: PoseModelVariant) => {
+    const ok = await processPoseForVideo(video, modelVariant);
     if (ok) {
-      toast({ title: 'Pose Ready' });
+      setPoseModelVariant(modelVariant);
+      toast({ title: `Pose Ready (${getPoseProcessModelLabel(modelVariant)})` });
     } else {
-      toast({ title: 'Pose preprocessing failed', variant: 'destructive' });
+      const state = getPoseProcessingState(video.id);
+      if (state.status === 'error') {
+        toast({ title: 'Pose preprocessing failed', variant: 'destructive' });
+      }
     }
   };
 
@@ -120,47 +153,138 @@ export function VideoLibrary() {
 
     if (state.status === 'ready') {
       return (
-        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-1 text-[11px] font-semibold text-emerald-400">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Pose Ready
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="mt-2 inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-1 text-[11px] font-semibold text-emerald-400 hover:bg-emerald-500/25"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {`Pose Ready (${getPoseProcessModelLabel(state.modelVariant)})`}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {POSE_PROCESS_MODEL_OPTIONS.map((option) => (
+              <DropdownMenuItem
+                key={`process-${video.id}-${option.variant}`}
+                onSelect={(e) => {
+                  e.stopPropagation();
+                  void handleProcessPose(video, option.variant);
+                }}
+              >
+                {`Reprocess ${option.label}`}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      );
+    }
+
+    if (state.status === 'queued') {
+      return (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-sky-500/15 px-2 py-1 text-[11px] font-semibold text-sky-300">
+          <Loader2 className="h-3.5 w-3.5" />
+          <span>{`Pose queued (${getPoseProcessModelLabel(state.modelVariant)})`}</span>
+          <button
+            className="inline-flex items-center gap-1 rounded border border-sky-300/40 px-1.5 py-0.5 text-[10px] hover:bg-sky-400/15"
+            onClick={(e) => {
+              e.stopPropagation();
+              cancelPoseProcessing(video.id);
+            }}
+            title="Cancel queued pose processing"
+          >
+            <Square className="h-3 w-3 fill-current" />
+            Cancel
+          </button>
         </div>
       );
     }
 
     if (state.status === 'processing') {
       return (
-        <div className="mt-2 inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-1 text-[11px] font-semibold text-amber-300">
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-500/15 px-2 py-1 text-[11px] font-semibold text-amber-300">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          {`Pose ${Math.round(state.progress * 100)}%${state.etaSec !== null ? ` · ${Math.max(0, Math.ceil(state.etaSec))}s` : ''}`}
+          <span>{`Pose ${Math.round(state.progress * 100)}% (${getPoseProcessModelLabel(state.modelVariant)})${state.etaSec !== null ? ` · ${Math.max(0, Math.ceil(state.etaSec))}s` : ''}`}</span>
+          <button
+            className="inline-flex items-center gap-1 rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] hover:bg-amber-400/15"
+            onClick={(e) => {
+              e.stopPropagation();
+              cancelPoseProcessing(video.id);
+            }}
+            title="Cancel pose processing"
+          >
+            <Square className="h-3 w-3 fill-current" />
+            Cancel
+          </button>
         </div>
       );
     }
 
     if (state.status === 'error') {
       return (
-        <button
-          className="mt-2 inline-flex items-center gap-1 rounded-md bg-destructive/20 px-2 py-1 text-[11px] font-semibold text-destructive hover:bg-destructive/30"
-          onClick={(e) => {
-            e.stopPropagation();
-            void handleProcessPose(video);
-          }}
-        >
-          <AlertTriangle className="h-3.5 w-3.5" />
-          Retry Pose
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="mt-2 inline-flex items-center gap-1 rounded-md bg-destructive/20 px-2 py-1 text-[11px] font-semibold text-destructive hover:bg-destructive/30"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Retry Pose
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {POSE_PROCESS_MODEL_OPTIONS.map((option) => (
+              <DropdownMenuItem
+                key={`retry-${video.id}-${option.variant}`}
+                onSelect={(e) => {
+                  e.stopPropagation();
+                  void handleProcessPose(video, option.variant);
+                }}
+              >
+                {`Process ${option.label}`}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       );
     }
 
     return (
-      <button
-        className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary/20 px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/30"
-        onClick={(e) => {
-          e.stopPropagation();
-          void handleProcessPose(video);
-        }}
-      >
-        Process Pose
-      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary/20 px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/30"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Process Pose
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {POSE_PROCESS_MODEL_OPTIONS.map((option) => (
+            <DropdownMenuItem
+              key={`process-menu-${video.id}-${option.variant}`}
+              onSelect={(e) => {
+                e.stopPropagation();
+                void handleProcessPose(video, option.variant);
+              }}
+            >
+              {`Process ${option.label}`}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     );
   };
 
@@ -185,7 +309,12 @@ export function VideoLibrary() {
           <ScrollArea className="h-full">
             {library.length > 0 ? (
               <SidebarMenu>
-                {library.map((video) => (
+                {[...library].sort((a, b) => {
+                  // Favorites first, then by date
+                  if (a.isFavorite && !b.isFavorite) return -1;
+                  if (!a.isFavorite && b.isFavorite) return 1;
+                  return 0;
+                }).map((video) => (
                   <SidebarMenuItem key={video.id}>
                     <div
                       className="group/menu-item relative flex flex-col items-start p-2 rounded-md hover:bg-sidebar-accent w-full text-left cursor-pointer transition-colors"
@@ -193,6 +322,12 @@ export function VideoLibrary() {
                     >
                       {/* Thumbnail Container */}
                       <div className="w-full aspect-video bg-black/10 rounded-md mb-2 overflow-hidden border border-border/20 relative shadow-sm">
+                        {/* Favorite badge — always visible when favorited */}
+                        {video.isFavorite && (
+                          <div className="absolute top-1 left-1 z-10 pointer-events-none">
+                            <Star className="h-4 w-4 text-yellow-400 fill-current drop-shadow-md" />
+                          </div>
+                        )}
                         {video.thumbnail ? (
                           <img src={video.thumbnail} alt={video.name} className="w-full h-full object-cover" />
                         ) : (
@@ -208,6 +343,18 @@ export function VideoLibrary() {
                           <Button
                             size="icon"
                             variant="ghost"
+                            className={`h-6 w-6 hover:bg-white/20 ${video.isFavorite
+                                ? 'text-yellow-400 hover:text-yellow-300 opacity-100'
+                                : 'text-white hover:text-yellow-400'
+                              }`}
+                            onClick={(e) => { e.stopPropagation(); void toggleFavorite(video.id); }}
+                            title={video.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                          >
+                            <Star className={`h-4 w-4 ${video.isFavorite ? 'fill-current' : ''}`} />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
                             className="h-6 w-6 text-white hover:text-white hover:bg-white/20"
                             onClick={(e) => { e.stopPropagation(); void handleAddToGrid(video); }}
                             title="Add to Grid"
@@ -218,7 +365,7 @@ export function VideoLibrary() {
                             size="icon"
                             variant="ghost"
                             className="h-6 w-6 text-red-400 hover:text-red-300 hover:bg-white/20"
-                            onClick={(e) => { e.stopPropagation(); removeVideoFromLibrary(video.id); }}
+                            onClick={(e) => { e.stopPropagation(); void removeVideoFromLibrary(video.id); }}
                             title="Delete Video"
                           >
                             <Trash2 className="h-4 w-4" />

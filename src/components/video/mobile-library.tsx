@@ -2,13 +2,22 @@
 import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAppContext } from '@/contexts/app-context';
-import { FilePlus, Trash2, PlusCircle, Video, ChevronUp, ChevronDown, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { getPoseProcessModelLabel, POSE_PROCESS_MODEL_OPTIONS } from '@/lib/pose/pose-model-label';
+import { FilePlus, Trash2, PlusCircle, Video, ChevronUp, ChevronDown, Loader2, CheckCircle2, AlertTriangle, Square } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { VideoRecorder } from './video-recorder';
 import { TrimDialog } from './trim-dialog';
 import { extractThumbnail } from '@/lib/video-utils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import type { PoseModelVariant } from '@/types';
 
 export function MobileLibrary() {
+  const DUPLICATE_ADD_WINDOW_MS = 450;
   const {
     library,
     addVideoToLibrary,
@@ -18,10 +27,13 @@ export function MobileLibrary() {
     isPoseEnabled,
     processPoseForVideo,
     getPoseProcessingState,
+    setPoseModelVariant,
+    cancelPoseProcessing,
   } = useAppContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastAddActionRef = useRef<{ videoId: string; atMs: number } | null>(null);
 
   // Collapse/expand state
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -76,12 +88,27 @@ export function MobileLibrary() {
   };
 
   const handleAddToGrid = async (video: import('@/types').Video) => {
+    const nowMs = performance.now();
+    const lastAdd = lastAddActionRef.current;
+    if (lastAdd && lastAdd.videoId === video.id && (nowMs - lastAdd.atMs) < DUPLICATE_ADD_WINDOW_MS) {
+      return;
+    }
+    lastAddActionRef.current = { videoId: video.id, atMs: nowMs };
+
     if (isPoseEnabled) {
-      const ok = await processPoseForVideo(video);
-      if (!ok) {
-        toast({ title: 'Pose preprocessing failed', description: 'Please retry from the library card.', variant: 'destructive' });
+      const poseState = getPoseProcessingState(video.id);
+      if (poseState.status !== 'ready' || !poseState.modelVariant) {
+        toast({ title: 'Pose not ready', description: 'Process this clip before loading it.', variant: 'destructive' });
         return;
       }
+      setPoseModelVariant(poseState.modelVariant);
+    }
+
+    const existingSlotIndex = slots.findIndex((slot) => slot?.id === video.id);
+    if (existingSlotIndex !== -1) {
+      setSlot(existingSlotIndex, video);
+      toast({ title: 'Video already in grid' });
+      return;
     }
 
     const emptySlotIndex = slots.findIndex((slot) => slot === null);
@@ -93,12 +120,16 @@ export function MobileLibrary() {
     }
   };
 
-  const handleProcessPose = async (video: import('@/types').Video) => {
-    const ok = await processPoseForVideo(video);
+  const handleProcessPose = async (video: import('@/types').Video, modelVariant: PoseModelVariant) => {
+    const ok = await processPoseForVideo(video, modelVariant);
     if (ok) {
-      toast({ title: 'Pose Ready' });
+      setPoseModelVariant(modelVariant);
+      toast({ title: `Pose Ready (${getPoseProcessModelLabel(modelVariant)})` });
     } else {
-      toast({ title: 'Pose preprocessing failed', variant: 'destructive' });
+      const state = getPoseProcessingState(video.id);
+      if (state.status === 'error') {
+        toast({ title: 'Pose preprocessing failed', variant: 'destructive' });
+      }
     }
   };
 
@@ -107,9 +138,53 @@ export function MobileLibrary() {
 
     if (state.status === 'ready') {
       return (
-        <div className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300">
-          <CheckCircle2 className="h-3 w-3" />
-          Ready
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {`Ready (${getPoseProcessModelLabel(state.modelVariant)})`}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {POSE_PROCESS_MODEL_OPTIONS.map((option) => (
+              <DropdownMenuItem
+                key={`m-reprocess-${video.id}-${option.variant}`}
+                onSelect={(e) => {
+                  e.stopPropagation();
+                  void handleProcessPose(video, option.variant);
+                }}
+              >
+                {`Reprocess ${option.label}`}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      );
+    }
+
+    if (state.status === 'queued') {
+      return (
+        <div className="mt-1 inline-flex items-center gap-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-sky-200">
+          <Loader2 className="h-3 w-3" />
+          <span>{`Queued (${getPoseProcessModelLabel(state.modelVariant)})`}</span>
+          <button
+            className="inline-flex items-center gap-0.5 rounded border border-sky-200/40 px-1 py-[1px] text-[8px] hover:bg-sky-300/15"
+            onClick={(e) => {
+              e.stopPropagation();
+              cancelPoseProcessing(video.id);
+            }}
+            title="Cancel queued pose processing"
+          >
+            <Square className="h-2.5 w-2.5 fill-current" />
+            Stop
+          </button>
         </div>
       );
     }
@@ -118,36 +193,83 @@ export function MobileLibrary() {
       return (
         <div className="mt-1 inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-200">
           <Loader2 className="h-3 w-3 animate-spin" />
-          {`${Math.round(state.progress * 100)}%`}
+          <span>{`${Math.round(state.progress * 100)}% (${getPoseProcessModelLabel(state.modelVariant)})`}</span>
+          <button
+            className="inline-flex items-center gap-0.5 rounded border border-amber-200/40 px-1 py-[1px] text-[8px] hover:bg-amber-300/15"
+            onClick={(e) => {
+              e.stopPropagation();
+              cancelPoseProcessing(video.id);
+            }}
+            title="Cancel pose processing"
+          >
+            <Square className="h-2.5 w-2.5 fill-current" />
+            Stop
+          </button>
         </div>
       );
     }
 
     if (state.status === 'error') {
       return (
-        <button
-          className="mt-1 inline-flex items-center gap-1 rounded bg-destructive/20 px-1.5 py-0.5 text-[9px] font-semibold text-destructive"
-          onClick={(e) => {
-            e.stopPropagation();
-            void handleProcessPose(video);
-          }}
-        >
-          <AlertTriangle className="h-3 w-3" />
-          Retry Pose
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="mt-1 inline-flex items-center gap-1 rounded bg-destructive/20 px-1.5 py-0.5 text-[9px] font-semibold text-destructive"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Retry Pose
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {POSE_PROCESS_MODEL_OPTIONS.map((option) => (
+              <DropdownMenuItem
+                key={`m-retry-${video.id}-${option.variant}`}
+                onSelect={(e) => {
+                  e.stopPropagation();
+                  void handleProcessPose(video, option.variant);
+                }}
+              >
+                {`Process ${option.label}`}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       );
     }
 
     return (
-      <button
-        className="mt-1 inline-flex items-center rounded bg-primary/20 px-1.5 py-0.5 text-[9px] font-semibold text-primary"
-        onClick={(e) => {
-          e.stopPropagation();
-          void handleProcessPose(video);
-        }}
-      >
-        Process Pose
-      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="mt-1 inline-flex items-center rounded bg-primary/20 px-1.5 py-0.5 text-[9px] font-semibold text-primary"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Process Pose
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {POSE_PROCESS_MODEL_OPTIONS.map((option) => (
+            <DropdownMenuItem
+              key={`m-process-${video.id}-${option.variant}`}
+              onSelect={(e) => {
+                e.stopPropagation();
+                void handleProcessPose(video, option.variant);
+              }}
+            >
+              {`Process ${option.label}`}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     );
   };
 
@@ -241,7 +363,7 @@ export function MobileLibrary() {
                         className="h-7 w-7 bg-black/60 text-red-400 hover:text-red-300 hover:bg-black/80 rounded"
                         onClick={(e) => {
                           e.stopPropagation();
-                          removeVideoFromLibrary(video.id);
+                          void removeVideoFromLibrary(video.id);
                         }}
                         title="Delete Video"
                       >

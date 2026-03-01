@@ -18,7 +18,7 @@ import {
 } from '@/lib/pose/one-euro-filter';
 import {
   buildPoseAnalysisCacheId,
-  findClosestPoseFrame,
+  findInterpolatedPosesAtTimestamp,
   loadPoseAnalysisCache,
   type CachedPoseFrame,
   type PoseAnalysisCacheKey,
@@ -157,6 +157,7 @@ export function usePoseLandmarks({
   const filterStatesRef = useRef<LandmarkFilterState[]>([]);
   const lastMediaTimeMsRef = useRef(-1);
   const monotonicTimeMsRef = useRef(0);
+  const lastRenderedMediaTimeMsRef = useRef(-1);
 
   useEffect(() => {
     return () => {
@@ -183,6 +184,7 @@ export function usePoseLandmarks({
       filterStatesRef.current = [];
       lastMediaTimeMsRef.current = -1;
       monotonicTimeMsRef.current = 0;
+      lastRenderedMediaTimeMsRef.current = -1;
       cachedFramesRef.current = null;
       cacheIdRef.current = null;
       return;
@@ -193,6 +195,7 @@ export function usePoseLandmarks({
       filterStatesRef.current = [];
       lastMediaTimeMsRef.current = -1;
       monotonicTimeMsRef.current = 0;
+      lastRenderedMediaTimeMsRef.current = -1;
       cachedFramesRef.current = null;
       cacheIdRef.current = null;
     }
@@ -322,7 +325,7 @@ export function usePoseLandmarks({
     let lastProcessedMediaTime = -1;
 
     const runInference = async (now: number, force: boolean, metadata?: VideoFrameCallbackMetadata) => {
-      if (cancelled || hasFatalError || !videoElement || isBusyRef.current) return;
+      if (cancelled || hasFatalError || !videoElement) return;
       if (!force && document.hidden) return;
       if (videoElement.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
       if (!force && videoElement.paused) return;
@@ -346,6 +349,10 @@ export function usePoseLandmarks({
           ? Math.floor(videoElement.currentTime * 1000)
           : Math.floor(now);
 
+      if (shouldUseCachedAnalysis && !force && currentMediaTimeMs === lastRenderedMediaTimeMsRef.current) {
+        return;
+      }
+
       // ── Compute dtMs for the 1€ filter ──
       let dtMs = lastMediaTimeMsRef.current >= 0
         ? currentMediaTimeMs - lastMediaTimeMsRef.current
@@ -367,8 +374,12 @@ export function usePoseLandmarks({
       const timestampMs = monotonicTimeMsRef.current;
 
       setMediaTimeMs(currentMediaTimeMs);
+      lastRenderedMediaTimeMsRef.current = currentMediaTimeMs;
 
-      isBusyRef.current = true;
+      if (!shouldUseCachedAnalysis) {
+        if (isBusyRef.current) return;
+        isBusyRef.current = true;
+      }
       lastInferenceTimeRef.current = now;
 
       try {
@@ -377,14 +388,14 @@ export function usePoseLandmarks({
 
         if (shouldUseCachedAnalysis) {
           if (!analysisReady) {
-            await ensureCachedAnalysis();
+            void ensureCachedAnalysis();
+            return;
           }
           if (cancelled) return;
 
           const cachedFrames = cachedFramesRef.current;
           if (cachedFrames && cachedFrames.length > 0) {
-            const cachedFrame = findClosestPoseFrame(cachedFrames, currentMediaTimeMs);
-            detectedPoses = cachedFrame?.poses ?? [];
+            detectedPoses = findInterpolatedPosesAtTimestamp(cachedFrames, currentMediaTimeMs) ?? [];
             detectedWorldPoses = [];
             setAnalysisStatus('ready');
             setAnalysisProgress(1);
@@ -453,7 +464,9 @@ export function usePoseLandmarks({
           setAnalysisEtaSec(null);
         }
       } finally {
-        isBusyRef.current = false;
+        if (!shouldUseCachedAnalysis) {
+          isBusyRef.current = false;
+        }
       }
     };
 
@@ -486,6 +499,7 @@ export function usePoseLandmarks({
       runtime.resetTracker();
       filterStatesRef.current = [];
       lastMediaTimeMsRef.current = -1;
+      lastRenderedMediaTimeMsRef.current = -1;
       runImmediate();
     };
     const onPause = () => runImmediate();

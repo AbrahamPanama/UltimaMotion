@@ -12,6 +12,7 @@ interface PosePreprocessJobOptions {
   cacheKey: PoseAnalysisCacheKey;
   runtimeConfig: PoseRuntimeConfig;
   targetFps: number;
+  signal?: AbortSignal;
   onProgress?: (progress: number, etaSec: number | null) => void;
 }
 
@@ -24,8 +25,24 @@ const formatError = (error: unknown) => {
   return 'Pose preprocessing failed.';
 };
 
-const seekVideo = (videoElement: HTMLVideoElement, timeSec: number) =>
-  new Promise<void>((resolve) => {
+const createAbortError = () => {
+  const error = new Error('Pose preprocessing canceled.');
+  error.name = 'AbortError';
+  return error;
+};
+
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+};
+
+const seekVideo = (videoElement: HTMLVideoElement, timeSec: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
     const clampedTime = Math.max(0, timeSec);
     if (Math.abs(videoElement.currentTime - clampedTime) < 0.001) {
       resolve();
@@ -33,8 +50,13 @@ const seekVideo = (videoElement: HTMLVideoElement, timeSec: number) =>
     }
 
     let settled = false;
+    let timeoutHandle: number | null = null;
     const cleanup = () => {
       videoElement.removeEventListener('seeked', onSeeked);
+      signal?.removeEventListener('abort', onAbort);
+      if (timeoutHandle !== null) {
+        window.clearTimeout(timeoutHandle);
+      }
     };
     const finish = () => {
       if (settled) return;
@@ -42,24 +64,104 @@ const seekVideo = (videoElement: HTMLVideoElement, timeSec: number) =>
       cleanup();
       resolve();
     };
+    const failAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(createAbortError());
+    };
     const onSeeked = () => finish();
+    const onAbort = () => failAbort();
 
     videoElement.addEventListener('seeked', onSeeked, { once: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
     videoElement.currentTime = clampedTime;
-    window.setTimeout(finish, SEEK_TIMEOUT_MS);
+    timeoutHandle = window.setTimeout(finish, SEEK_TIMEOUT_MS);
   });
 
-const waitForCanPlay = (videoElement: HTMLVideoElement) =>
+type VideoFrameCallback = (now: number, metadata: VideoFrameCallbackMetadata) => void;
+type VideoWithFrameCallback = HTMLVideoElement & {
+  requestVideoFrameCallback?: (callback: VideoFrameCallback) => number;
+  cancelVideoFrameCallback?: (handle: number) => void;
+};
+
+const waitForDecodedFrame = (videoElement: HTMLVideoElement, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
+    const videoWithCallback = videoElement as VideoWithFrameCallback;
+    if (videoWithCallback.requestVideoFrameCallback) {
+      let settled = false;
+      let handle: number | null = null;
+      let timeoutHandle: number | null = null;
+      const cleanup = () => {
+        signal?.removeEventListener('abort', onAbort);
+        if (handle !== null && videoWithCallback.cancelVideoFrameCallback) {
+          videoWithCallback.cancelVideoFrameCallback(handle);
+        }
+        if (timeoutHandle !== null) {
+          window.clearTimeout(timeoutHandle);
+        }
+      };
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      const failAbort = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(createAbortError());
+      };
+      const onAbort = () => failAbort();
+      handle = videoWithCallback.requestVideoFrameCallback(() => finish());
+      signal?.addEventListener('abort', onAbort, { once: true });
+      timeoutHandle = window.setTimeout(finish, 100);
+      return;
+    }
+
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    };
+    const failAbort = () => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      reject(createAbortError());
+    };
+    const onAbort = () => failAbort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    requestAnimationFrame(() => finish());
+  });
+
+const waitForCanPlay = (videoElement: HTMLVideoElement, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
     if (videoElement.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
       resolve();
       return;
     }
 
     let settled = false;
+    let timeoutHandle: number | null = null;
     const cleanup = () => {
       videoElement.removeEventListener('canplay', onCanPlay);
       videoElement.removeEventListener('error', onError);
+      signal?.removeEventListener('abort', onAbort);
+      if (timeoutHandle !== null) {
+        window.clearTimeout(timeoutHandle);
+      }
     };
     const finish = () => {
       if (settled) return;
@@ -73,12 +175,20 @@ const waitForCanPlay = (videoElement: HTMLVideoElement) =>
       cleanup();
       reject(new Error('Unable to decode video for pose preprocessing.'));
     };
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(createAbortError());
+    };
     const onCanPlay = () => finish();
     const onError = () => fail();
+    const onAbort = () => abort();
 
     videoElement.addEventListener('canplay', onCanPlay, { once: true });
     videoElement.addEventListener('error', onError, { once: true });
-    window.setTimeout(finish, 2500);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    timeoutHandle = window.setTimeout(finish, 2500);
   });
 
 const buildAnalysisRange = (video: Video, durationSec: number) => {
@@ -100,6 +210,7 @@ export async function preprocessPoseVideoClip({
   cacheKey,
   runtimeConfig,
   targetFps,
+  signal,
   onProgress,
 }: PosePreprocessJobOptions): Promise<{ frameCount: number }> {
   const runtime = createPoseRuntime();
@@ -121,8 +232,10 @@ export async function preprocessPoseVideoClip({
   document.body.appendChild(videoElement);
 
   try {
-    await waitForCanPlay(videoElement);
+    throwIfAborted(signal);
+    await waitForCanPlay(videoElement, signal);
     try {
+      throwIfAborted(signal);
       await videoElement.play();
       videoElement.pause();
     } catch {
@@ -144,7 +257,10 @@ export async function preprocessPoseVideoClip({
     let processedSteps = 0;
 
     for (let mediaMs = trimStartMs; mediaMs <= trimEndMs; mediaMs += stepMs) {
-      await seekVideo(videoElement, mediaMs / 1000);
+      throwIfAborted(signal);
+      await seekVideo(videoElement, mediaMs / 1000, signal);
+      await waitForDecodedFrame(videoElement, signal);
+      throwIfAborted(signal);
 
       const currentMediaMs = Math.max(trimStartMs, Math.floor(videoElement.currentTime * 1000));
       const dtMs = previousMediaMs >= 0 ? Math.max(1, currentMediaMs - previousMediaMs) : Math.max(1, stepMs);
@@ -152,6 +268,7 @@ export async function preprocessPoseVideoClip({
       previousMediaMs = currentMediaMs;
 
       const result = await runtime.detectForVideo(videoElement, analysisTimestampMs, runtimeConfig);
+      throwIfAborted(signal);
       const detectedPoses = result?.landmarks ?? [];
       const previousFrame = frames[frames.length - 1];
       if (previousFrame && previousFrame.timestampMs === currentMediaMs) {
@@ -179,9 +296,12 @@ export async function preprocessPoseVideoClip({
     await savePoseAnalysisCache(cacheKey, frames);
 
     // Ensure we end in-range for predictable downstream behavior if caller reuses this element.
-    await seekVideo(videoElement, trimStartSec);
+    await seekVideo(videoElement, trimStartSec, signal);
     return { frameCount: frames.length };
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw error;
+    }
     throw new Error(formatError(error));
   } finally {
     runtime.close();
