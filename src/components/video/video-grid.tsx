@@ -18,7 +18,10 @@ type ActiveVideoEntry = {
 const DRIFT_SOFT_THRESHOLD_SEC = 1 / 120; // ~8ms
 const DRIFT_HARD_THRESHOLD_SEC = 1 / 20; // 50ms
 const MAX_RATE_CORRECTION = 0.08;
-const SEEK_TIMEOUT_MS = 300;
+const SEEK_TIMEOUT_MS = 750;
+const FALLBACK_FRAME_STEP_SEC = 1 / 30;
+const MIN_FRAME_STEP_SEC = 1 / 240;
+const MAX_FRAME_STEP_SEC = 1 / 12;
 
 const clampPlaybackRate = (rate: number) => Math.max(0.1, Math.min(4, rate));
 
@@ -76,8 +79,13 @@ export default function VideoGrid() {
 
   const rafRef = useRef<number | null>(null);
   const isPlayingRef = useRef(false);
+  const playbackRateRef = useRef(playbackRate);
   const syncBusyRef = useRef(false);
-  const pendingSyncRef = useRef<{ relativeTime: number; resume: boolean } | null>(null);
+  const pendingSyncRef = useRef<{ relativeTime: number; resume: boolean; targetPlaybackRate: number } | null>(null);
+  const frameStepSecRef = useRef(FALLBACK_FRAME_STEP_SEC);
+  const frameObserverVideoRef = useRef<HTMLVideoElement | null>(null);
+  const frameObserverHandleRef = useRef<number | null>(null);
+  const lastObservedMediaTimeRef = useRef<number | null>(null);
   const overlayEntries = slots
     .map((slot, index) => ({ slot, index }))
     .filter((entry): entry is { slot: Video; index: number } => entry.slot !== null);
@@ -88,11 +96,80 @@ export default function VideoGrid() {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
+  useEffect(() => {
+    playbackRateRef.current = playbackRate;
+  }, [playbackRate]);
+
   const getActiveVideos = useCallback((): ActiveVideoEntry[] => {
     return videoRefs.current
       .map((video, index) => ({ video, index, slot: slots[index] }))
       .filter((item): item is ActiveVideoEntry => item.video !== null && item.slot !== null);
   }, [videoRefs, slots]);
+
+  const getFrameStepSec = useCallback(() => {
+    const raw = frameStepSecRef.current;
+    if (!Number.isFinite(raw)) return FALLBACK_FRAME_STEP_SEC;
+    return Math.max(MIN_FRAME_STEP_SEC, Math.min(MAX_FRAME_STEP_SEC, raw));
+  }, []);
+
+  useEffect(() => {
+    const previousVideo = frameObserverVideoRef.current;
+    const previousHandle = frameObserverHandleRef.current;
+    if (
+      previousVideo &&
+      previousHandle !== null &&
+      typeof previousVideo.cancelVideoFrameCallback === 'function'
+    ) {
+      previousVideo.cancelVideoFrameCallback(previousHandle);
+    }
+    frameObserverVideoRef.current = null;
+    frameObserverHandleRef.current = null;
+    lastObservedMediaTimeRef.current = null;
+
+    if (!isSharedPlaybackMode) return;
+
+    const master = getActiveVideos()[0]?.video ?? null;
+    if (
+      !master ||
+      typeof master.requestVideoFrameCallback !== 'function' ||
+      typeof master.cancelVideoFrameCallback !== 'function'
+    ) {
+      return;
+    }
+
+    frameObserverVideoRef.current = master;
+
+    const observeFrame: VideoFrameRequestCallback = (_now, metadata) => {
+      if (frameObserverVideoRef.current !== master) return;
+      const mediaTime = metadata.mediaTime;
+      const prevMediaTime = lastObservedMediaTimeRef.current;
+      if (prevMediaTime !== null) {
+        const delta = mediaTime - prevMediaTime;
+        if (Number.isFinite(delta) && delta >= MIN_FRAME_STEP_SEC && delta <= MAX_FRAME_STEP_SEC * 2) {
+          frameStepSecRef.current = (frameStepSecRef.current * 0.8) + (delta * 0.2);
+        }
+      }
+      lastObservedMediaTimeRef.current = mediaTime;
+      frameObserverHandleRef.current = master.requestVideoFrameCallback(observeFrame);
+    };
+
+    frameObserverHandleRef.current = master.requestVideoFrameCallback(observeFrame);
+
+    return () => {
+      const observedVideo = frameObserverVideoRef.current;
+      const observedHandle = frameObserverHandleRef.current;
+      if (
+        observedVideo &&
+        observedHandle !== null &&
+        typeof observedVideo.cancelVideoFrameCallback === 'function'
+      ) {
+        observedVideo.cancelVideoFrameCallback(observedHandle);
+      }
+      frameObserverVideoRef.current = null;
+      frameObserverHandleRef.current = null;
+      lastObservedMediaTimeRef.current = null;
+    };
+  }, [getActiveVideos, isSharedPlaybackMode]);
 
   const getTrimBounds = useCallback((slot: Video, video: HTMLVideoElement) => {
     const start = slot.trimStart ?? 0;
@@ -138,9 +215,14 @@ export default function VideoGrid() {
   );
 
   const syncToRelativeTime = useCallback(
-    async (relativeTime: number, options?: { resume?: boolean }) => {
+    async (relativeTime: number, options?: { resume?: boolean; targetPlaybackRate?: number }) => {
       const requestedResume = options?.resume ?? isPlayingRef.current;
-      pendingSyncRef.current = { relativeTime, resume: requestedResume };
+      const requestedPlaybackRate = clampPlaybackRate(options?.targetPlaybackRate ?? playbackRateRef.current);
+      pendingSyncRef.current = {
+        relativeTime,
+        resume: requestedResume,
+        targetPlaybackRate: requestedPlaybackRate,
+      };
 
       if (syncBusyRef.current) return;
       syncBusyRef.current = true;
@@ -174,18 +256,29 @@ export default function VideoGrid() {
             })
           );
 
-          active.forEach(({ video }) => {
-            video.playbackRate = playbackRate;
+          active.forEach(({ video, index, slot }) => {
+            const { start } = getTrimBounds(slot, video);
+            const offset = syncOffsets[index] || 0;
+            const targetTime = clampToTrim(start + offset + clampedRelative, slot, video);
+            if (Math.abs(video.currentTime - targetTime) >= 0.001) {
+              video.currentTime = targetTime;
+            }
+            video.playbackRate = next.targetPlaybackRate;
           });
 
           setCurrentTime(clampedRelative);
 
           if (next.resume) {
-            await Promise.all(
-              active.map(({ video }) =>
-                video.play().catch(() => undefined)
-              )
+            const playResults = await Promise.allSettled(
+              active.map(({ video }) => video.play())
             );
+            const hadPlayFailure = playResults.some((result) => result.status === 'rejected');
+            if (hadPlayFailure) {
+              active.forEach(({ video }) => video.pause());
+              setIsPlaying(false);
+              console.warn('[sync] Could not resume all videos after seek; kept playback paused to preserve sync.');
+              continue;
+            }
           }
 
           setIsPlaying(next.resume);
@@ -194,7 +287,7 @@ export default function VideoGrid() {
         syncBusyRef.current = false;
       }
     },
-    [clampToTrim, getActiveVideos, getSyncDuration, getTrimBounds, playbackRate, syncOffsets]
+    [clampToTrim, getActiveVideos, getSyncDuration, getTrimBounds, syncOffsets]
   );
 
   const tick = useCallback(() => {
@@ -309,23 +402,48 @@ export default function VideoGrid() {
     const clampedTime =
       syncDuration > 0 ? Math.max(0, Math.min(time, syncDuration)) : Math.max(0, time);
     setCurrentTime(clampedTime);
-    void syncToRelativeTime(clampedTime, { resume: isPlayingRef.current });
+    void syncToRelativeTime(clampedTime, {
+      resume: isPlayingRef.current,
+      targetPlaybackRate: playbackRateRef.current,
+    });
   };
 
+  const handleStepFrame = useCallback((direction: -1 | 1) => {
+    const active = getActiveVideos();
+    if (active.length === 0) return;
+
+    const stepSec = getFrameStepSec();
+    const syncDuration = getSyncDuration();
+    const masterRelative = getMasterRelativeTime(active);
+    const unclampedTime = masterRelative + (direction * stepSec);
+    const nextTime =
+      syncDuration > 0
+        ? Math.max(0, Math.min(unclampedTime, syncDuration))
+        : Math.max(0, unclampedTime);
+
+    active.forEach(({ video }) => video.pause());
+    setIsPlaying(false);
+    setCurrentTime(nextTime);
+    void syncToRelativeTime(nextTime, {
+      resume: false,
+      targetPlaybackRate: playbackRateRef.current,
+    });
+  }, [getActiveVideos, getFrameStepSec, getMasterRelativeTime, getSyncDuration, syncToRelativeTime]);
+
   const handleRateChange = (rate: number) => {
+    const nextRate = clampPlaybackRate(rate);
+    playbackRateRef.current = nextRate;
+    setPlaybackRate(nextRate);
+
     const active = getActiveVideos();
     if (active.length === 0) {
-      setPlaybackRate(rate);
       return;
     }
 
     const masterRelative = getMasterRelativeTime(active);
-    void syncToRelativeTime(masterRelative, { resume: isPlayingRef.current }).then(() => {
-      const latest = getActiveVideos();
-      latest.forEach(({ video }) => {
-        video.playbackRate = rate;
-      });
-      setPlaybackRate(rate);
+    void syncToRelativeTime(masterRelative, {
+      resume: isPlayingRef.current,
+      targetPlaybackRate: nextRate,
     });
   };
 
@@ -383,6 +501,8 @@ export default function VideoGrid() {
               onSeek={handleSeek}
               playbackRate={playbackRate}
               onRateChange={handleRateChange}
+              onStepBack={() => handleStepFrame(-1)}
+              onStepForward={() => handleStepFrame(1)}
               isSyncEnabled={false}
               variant="static"
             />

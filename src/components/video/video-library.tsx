@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Sidebar,
   SidebarContent,
@@ -51,6 +51,36 @@ export function VideoLibrary() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [isTrimOpen, setIsTrimOpen] = useState(false);
   const [nextSegmentIndex, setNextSegmentIndex] = useState(0);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+
+  const sortedLibrary = useMemo(() => {
+    const toTimestamp = (value: Date | string | number | undefined) => {
+      if (value instanceof Date) return value.getTime();
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      return 0;
+    };
+
+    return [...library].sort((a, b) => {
+      const createdAtDelta = toTimestamp(b.createdAt) - toTimestamp(a.createdAt);
+      if (createdAtDelta !== 0) return createdAtDelta;
+
+      return a.id.localeCompare(b.id);
+    });
+  }, [library]);
+
+  const favoriteCount = useMemo(
+    () => sortedLibrary.filter((video) => Boolean(video.isFavorite)).length,
+    [sortedLibrary]
+  );
+
+  const displayedLibrary = useMemo(
+    () => (showFavoritesOnly ? sortedLibrary.filter((video) => Boolean(video.isFavorite)) : sortedLibrary),
+    [showFavoritesOnly, sortedLibrary]
+  );
 
   // When a new file is loaded, reset the segment counter
   useEffect(() => {
@@ -294,8 +324,30 @@ export function VideoLibrary() {
         <SidebarHeader>
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold font-headline text-sidebar-foreground">Library</h2>
-            <SidebarTrigger />
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title={showFavoritesOnly ? 'Show all videos' : 'Show favorites only'}
+                onClick={() => setShowFavoritesOnly((prev) => !prev)}
+              >
+                <Star
+                  className={`h-4 w-4 ${
+                    showFavoritesOnly
+                      ? 'text-yellow-400 fill-current'
+                      : 'text-sidebar-foreground/70'
+                  }`}
+                />
+              </Button>
+              <SidebarTrigger />
+            </div>
           </div>
+          <p className="text-xs text-sidebar-foreground/70">
+            {showFavoritesOnly
+              ? `Favorites · ${favoriteCount}`
+              : `All clips · ${sortedLibrary.length}`}
+          </p>
           <div className="grid grid-cols-2 gap-2">
             <Button variant="outline" className="w-full text-foreground" onClick={() => fileInputRef.current?.click()}>
               <FilePlus className="mr-2" /> Import
@@ -307,14 +359,9 @@ export function VideoLibrary() {
         <Separator />
         <SidebarContent>
           <ScrollArea className="h-full">
-            {library.length > 0 ? (
+            {displayedLibrary.length > 0 ? (
               <SidebarMenu>
-                {[...library].sort((a, b) => {
-                  // Favorites first, then by date
-                  if (a.isFavorite && !b.isFavorite) return -1;
-                  if (!a.isFavorite && b.isFavorite) return 1;
-                  return 0;
-                }).map((video) => (
+                {displayedLibrary.map((video) => (
                   <SidebarMenuItem key={video.id}>
                     <div
                       className="group/menu-item relative flex flex-col items-start p-2 rounded-md hover:bg-sidebar-accent w-full text-left cursor-pointer transition-colors"
@@ -391,6 +438,12 @@ export function VideoLibrary() {
                   </SidebarMenuItem>
                 ))}
               </SidebarMenu>
+            ) : showFavoritesOnly ? (
+              <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+                <Star className="w-12 h-12 text-yellow-400/70 mb-3" />
+                <h3 className="font-bold text-sidebar-foreground">No Favorites Yet</h3>
+                <p className="text-sm text-muted-foreground">Tap the star on a clip to save it to favorites.</p>
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-full p-4 text-center">
                 <Video className="w-16 h-16 text-muted-foreground/50 mb-4" />

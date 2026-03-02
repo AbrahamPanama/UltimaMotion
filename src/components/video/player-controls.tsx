@@ -21,6 +21,8 @@ interface PlayerControlsProps {
   onSeek: (time: number) => void;
   playbackRate: number;
   onRateChange: (rate: number) => void;
+  onStepBack?: () => void;
+  onStepForward?: () => void;
   isSyncEnabled: boolean;
   variant?: 'overlay' | 'static';
 }
@@ -36,6 +38,8 @@ export default function PlayerControls({
   onSeek,
   playbackRate,
   onRateChange,
+  onStepBack,
+  onStepForward,
   isSyncEnabled,
   variant = 'overlay',
 }: PlayerControlsProps) {
@@ -93,17 +97,21 @@ export default function PlayerControls({
 
   const handleStepBack = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isPlaying) {
-      onPlayPause();
+    if (onStepBack) {
+      onStepBack();
+      return;
     }
+    if (isPlaying) onPlayPause();
     onSeek(Math.max(0, currentTime - FRAME_STEP));
   };
 
   const handleStepForward = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isPlaying) {
-      onPlayPause();
+    if (onStepForward) {
+      onStepForward();
+      return;
     }
+    if (isPlaying) onPlayPause();
     onSeek(Math.min(duration, currentTime + FRAME_STEP));
   };
 

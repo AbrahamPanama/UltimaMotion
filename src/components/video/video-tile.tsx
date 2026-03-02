@@ -68,6 +68,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     poseShowJointAngles,
     poseShowBodyLean,
     poseShowJumpHeight,
+    poseLabelScale,
     poseMinPoseDetectionConfidence,
     poseMinPosePresenceConfidence,
     poseMinTrackingConfidence
@@ -607,6 +608,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
             showJointAngles={poseShowJointAngles}
             showBodyLean={poseShowBodyLean}
             showJumpHeight={poseShowJumpHeight}
+            labelScale={poseLabelScale}
             minPoseDetectionConfidence={poseMinPoseDetectionConfidence}
             minPosePresenceConfidence={poseMinPosePresenceConfidence}
             minTrackingConfidence={poseMinTrackingConfidence}

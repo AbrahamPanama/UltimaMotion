@@ -61,10 +61,11 @@ export default function OverlayCompareTile({
   const topVideoFilter = (() => {
     const colorFilter = {
       none: 'none',
-      warm: 'saturate(1.12) contrast(1.05) sepia(0.08) hue-rotate(-6deg)',
-      cool: 'saturate(1.08) contrast(1.05) hue-rotate(10deg)',
-      vivid: 'saturate(1.35) contrast(1.1)',
-      sepia: 'sepia(0.6) contrast(1.05)',
+      red: 'grayscale(1) sepia(1) hue-rotate(-38deg) saturate(8.5) contrast(1.28) brightness(0.94)',
+      orange: 'grayscale(1) sepia(1) hue-rotate(-12deg) saturate(8) contrast(1.25) brightness(0.97)',
+      yellow: 'grayscale(1) sepia(1) hue-rotate(20deg) saturate(8.8) contrast(1.3) brightness(1.02)',
+      green: 'grayscale(1) sepia(1) hue-rotate(78deg) saturate(8.2) contrast(1.26) brightness(0.95)',
+      blue: 'grayscale(1) sepia(1) hue-rotate(168deg) saturate(8.6) contrast(1.29) brightness(0.93)',
     }[overlayTopColorFilter];
 
     const parts = colorFilter === 'none' ? [] : [colorFilter];

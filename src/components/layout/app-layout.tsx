@@ -1,4 +1,5 @@
 'use client';
+import { useEffect, useState } from 'react';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import Header from './header';
 import { VideoLibrary } from '../video/video-library';
@@ -8,7 +9,16 @@ import VideoGrid from '../video/video-grid';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 export default function AppLayout() {
+  const [mounted, setMounted] = useState(false);
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return <div className="h-svh w-full bg-background" />;
+  }
 
   if (isMobile) {
     return (

@@ -1,9 +1,9 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAppContext } from '@/contexts/app-context';
 import { getPoseProcessModelLabel, POSE_PROCESS_MODEL_OPTIONS } from '@/lib/pose/pose-model-label';
-import { FilePlus, Trash2, PlusCircle, Video, ChevronUp, ChevronDown, Loader2, CheckCircle2, AlertTriangle, Square } from 'lucide-react';
+import { FilePlus, Trash2, PlusCircle, Video, ChevronUp, ChevronDown, Loader2, CheckCircle2, AlertTriangle, Square, Star } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { VideoRecorder } from './video-recorder';
 import { TrimDialog } from './trim-dialog';
@@ -29,6 +29,7 @@ export function MobileLibrary() {
     getPoseProcessingState,
     setPoseModelVariant,
     cancelPoseProcessing,
+    toggleFavorite,
   } = useAppContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -42,6 +43,35 @@ export function MobileLibrary() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [isTrimOpen, setIsTrimOpen] = useState(false);
   const [nextSegmentIndex, setNextSegmentIndex] = useState(0);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+
+  const sortedLibrary = useMemo(() => {
+    const toTimestamp = (value: Date | string | number | undefined) => {
+      if (value instanceof Date) return value.getTime();
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
+      return 0;
+    };
+
+    return [...library].sort((a, b) => {
+      const createdAtDelta = toTimestamp(b.createdAt) - toTimestamp(a.createdAt);
+      if (createdAtDelta !== 0) return createdAtDelta;
+      return a.id.localeCompare(b.id);
+    });
+  }, [library]);
+
+  const favoriteCount = useMemo(
+    () => sortedLibrary.filter((video) => Boolean(video.isFavorite)).length,
+    [sortedLibrary]
+  );
+
+  const displayedLibrary = useMemo(
+    () => (showFavoritesOnly ? sortedLibrary.filter((video) => Boolean(video.isFavorite)) : sortedLibrary),
+    [showFavoritesOnly, sortedLibrary]
+  );
 
   useEffect(() => {
     if (pendingFile) {
@@ -280,9 +310,20 @@ export function MobileLibrary() {
         <div className="flex items-center justify-between px-3 py-2">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-bold font-headline text-foreground">Library</h2>
-            <span className="text-xs text-muted-foreground">({library.length})</span>
+            <span className="text-xs text-muted-foreground">
+              ({showFavoritesOnly ? favoriteCount : sortedLibrary.length})
+            </span>
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setShowFavoritesOnly((prev) => !prev)}
+              title={showFavoritesOnly ? 'Show all videos' : 'Show favorites only'}
+            >
+              <Star className={`h-4 w-4 ${showFavoritesOnly ? 'text-yellow-400 fill-current' : ''}`} />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -311,6 +352,11 @@ export function MobileLibrary() {
             </Button>
           </div>
         </div>
+        <div className="px-3 pb-1">
+          <p className="text-[10px] text-muted-foreground">
+            {showFavoritesOnly ? `Favorites · ${favoriteCount}` : `All clips · ${sortedLibrary.length}`}
+          </p>
+        </div>
 
         {/* Horizontal Filmstrip */}
         {!isCollapsed && (
@@ -319,8 +365,8 @@ export function MobileLibrary() {
             className="flex gap-3 overflow-x-auto px-3 pb-3 snap-x snap-mandatory scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent"
             style={{ WebkitOverflowScrolling: 'touch' }}
           >
-            {library.length > 0 ? (
-              library.map((video) => (
+            {displayedLibrary.length > 0 ? (
+              displayedLibrary.map((video) => (
                 <div
                   key={video.id}
                   className="group relative flex-shrink-0 w-[156px] snap-start cursor-pointer"
@@ -328,6 +374,11 @@ export function MobileLibrary() {
                 >
                   {/* Thumbnail */}
                   <div className="w-full aspect-video bg-black/10 rounded-lg overflow-hidden border border-border/30 relative shadow-sm">
+                    {video.isFavorite && (
+                      <div className="absolute top-0.5 left-0.5 z-10 pointer-events-none">
+                        <Star className="h-3.5 w-3.5 text-yellow-400 fill-current drop-shadow" />
+                      </div>
+                    )}
                     {video.thumbnail ? (
                       <img
                         src={video.thumbnail}
@@ -345,6 +396,22 @@ export function MobileLibrary() {
 
                     {/* Quick Actions */}
                     <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className={`h-7 w-7 rounded bg-black/60 hover:bg-black/80 ${
+                          video.isFavorite
+                            ? 'text-yellow-400 hover:text-yellow-300'
+                            : 'text-white hover:text-yellow-300'
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void toggleFavorite(video.id);
+                        }}
+                        title={video.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                      >
+                        <Star className={`h-3 w-3 ${video.isFavorite ? 'fill-current' : ''}`} />
+                      </Button>
                       <Button
                         size="icon"
                         variant="ghost"
@@ -391,6 +458,14 @@ export function MobileLibrary() {
                   </div>
                 </div>
               ))
+            ) : showFavoritesOnly ? (
+              <div className="flex items-center gap-3 py-4 px-2 w-full">
+                <Star className="w-8 h-8 text-yellow-400/70 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">No favorites yet</p>
+                  <p className="text-xs text-muted-foreground/70">Tap the star on a clip to save favorites</p>
+                </div>
+              </div>
             ) : (
               <div className="flex items-center gap-3 py-4 px-2 w-full">
                 <Video className="w-8 h-8 text-muted-foreground/40 flex-shrink-0" />

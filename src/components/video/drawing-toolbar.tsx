@@ -44,10 +44,11 @@ const OVERLAY_BLEND_OPTIONS: Array<{ value: OverlayBlendMode; label: string }> =
 
 const OVERLAY_COLOR_FILTER_OPTIONS: Array<{ value: OverlayColorFilter; label: string }> = [
     { value: 'none', label: 'None' },
-    { value: 'warm', label: 'Warm' },
-    { value: 'cool', label: 'Cool' },
-    { value: 'vivid', label: 'Vivid' },
-    { value: 'sepia', label: 'Sepia' },
+    { value: 'red', label: 'Red' },
+    { value: 'orange', label: 'Orange' },
+    { value: 'yellow', label: 'Yellow' },
+    { value: 'green', label: 'Green' },
+    { value: 'blue', label: 'Blue' },
 ];
 
 interface DrawingToolbarProps {
@@ -86,6 +87,8 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         setPoseShowBodyLean,
         poseShowJumpHeight,
         setPoseShowJumpHeight,
+        poseLabelScale,
+        setPoseLabelScale,
         isSyncDrawingsEnabled,
         toggleSyncDrawings,
         // View controls
@@ -151,9 +154,6 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         if (!canUseOverlayComparison) return;
         const nextMode = isOverlayMode ? 'grid' : 'overlay';
         setCompareViewMode(nextMode);
-        if (nextMode === 'overlay' && !isSyncEnabled) {
-            toggleSync();
-        }
     };
 
     useEffect(() => {
@@ -507,13 +507,20 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                     </div>
                                     <Slider value={[poseMinVisibility]} min={0} max={1} step={0.05} onValueChange={([v]) => setPoseMinVisibility(v)} />
                                 </div>
+                                <div className="space-y-1">
+                                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                        <span>Label Size</span>
+                                        <span>{Math.round(poseLabelScale * 100)}%</span>
+                                    </div>
+                                    <Slider value={[poseLabelScale]} min={0.7} max={2} step={0.05} onValueChange={([v]) => setPoseLabelScale(v)} />
+                                </div>
                             </div>
 
                             <div className="border-t border-border/50 pt-2 space-y-1.5">
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Analytics</p>
                                 {[
                                     { label: 'Center of Gravity', desc: 'Segment-weighted body mass center marker', value: poseShowCoG, set: setPoseShowCoG },
-                                    { label: 'CoG Axis Charts', desc: 'True-time X/Y/Z movement curves overlaid on video', value: poseShowCoGCharts, set: setPoseShowCoGCharts },
+                                    { label: 'Body Lean Chart', desc: 'True-time torso lean angle curve overlaid on video', value: poseShowCoGCharts, set: setPoseShowCoGCharts },
                                     { label: 'Joint Angles', desc: 'Knee, hip & elbow angle arcs', value: poseShowJointAngles, set: setPoseShowJointAngles },
                                     { label: 'Body Lean', desc: 'Torso tilt from vertical', value: poseShowBodyLean, set: setPoseShowBodyLean },
                                     { label: 'Jump Height', desc: 'Vertical displacement from baseline', value: poseShowJumpHeight, set: setPoseShowJumpHeight },

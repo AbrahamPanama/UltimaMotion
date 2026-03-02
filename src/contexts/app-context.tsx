@@ -13,6 +13,7 @@ import type { PoseRuntimeConfig } from '@/lib/pose/pose-runtime';
 import { useToast } from "@/hooks/use-toast";
 
 const MAX_SLOTS = 4;
+const DEFAULT_PLAYBACK_RATE = 1;
 
 export const SYNC_DRAWINGS_KEY = '__sync_drawings__';
 
@@ -27,13 +28,38 @@ export type OverlayBlendMode =
   | 'difference'
   | 'lighten'
   | 'darken';
-export type OverlayColorFilter = 'none' | 'warm' | 'cool' | 'vivid' | 'sepia';
+export type OverlayColorFilter = 'none' | 'red' | 'orange' | 'yellow' | 'green' | 'blue';
 
 const getRequiredLayoutForSlots = (slotList: (Video | null)[]): Layout => {
   const highestFilledIndex = slotList.reduce((highest, slot, index) => (slot ? index : highest), -1);
   if (highestFilledIndex >= 2) return 4;
   if (highestFilledIndex >= 1) return 2;
   return 1;
+};
+
+const compactSlots = (slotList: (Video | null)[]) => {
+  const compacted: (Video | null)[] = Array(MAX_SLOTS).fill(null);
+  const remap: number[] = [];
+  let nextIndex = 0;
+
+  slotList.forEach((slot, index) => {
+    if (!slot) return;
+    compacted[nextIndex] = slot;
+    remap[nextIndex] = index;
+    nextIndex += 1;
+  });
+
+  return { compacted, remap };
+};
+
+const getNextActiveTileIndex = (prevActiveIndex: number | null, remap: number[]) => {
+  if (remap.length === 0) return null;
+  if (prevActiveIndex === null) return 0;
+
+  const mappedIndex = remap.indexOf(prevActiveIndex);
+  if (mappedIndex !== -1) return mappedIndex;
+
+  return Math.min(prevActiveIndex, remap.length - 1);
 };
 
 export interface PoseProcessingState {
@@ -158,6 +184,8 @@ interface AppContextType {
   setPoseShowBodyLean: (value: boolean) => void;
   poseShowJumpHeight: boolean;
   setPoseShowJumpHeight: (value: boolean) => void;
+  poseLabelScale: number;
+  setPoseLabelScale: (value: number) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -177,7 +205,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [isLoopEnabled, setIsLoopEnabled] = useState<boolean>(true);
   const [syncOffsets, setSyncOffsets] = useState<number[]>(Array(MAX_SLOTS).fill(0));
   const [isMuted, setIsMuted] = useState<boolean>(false);
-  const [playbackRate, setPlaybackRate] = useState<number>(1);
+  const [playbackRate, setPlaybackRate] = useState<number>(DEFAULT_PLAYBACK_RATE);
   const [activeTileIndex, setActiveTileIndex] = useState<number | null>(0);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const poseProcessingPromisesRef = useRef<Record<string, Promise<boolean>>>({});
@@ -217,6 +245,25 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [poseShowJointAngles, setPoseShowJointAngles] = useState<boolean>(false);
   const [poseShowBodyLean, setPoseShowBodyLean] = useState<boolean>(false);
   const [poseShowJumpHeight, setPoseShowJumpHeight] = useState<boolean>(false);
+  const [poseLabelScale, setPoseLabelScale] = useState<number>(1);
+  const hadAnyGridVideoRef = useRef(false);
+
+  const resetTransientGridControls = useCallback(() => {
+    setIsDrawingEnabled(false);
+    setIsSyncDrawingsEnabled(false);
+    setIsPoseEnabled(false);
+    setIsSyncEnabled(false);
+    setIsPortraitMode(false);
+    setIsMuted(false);
+    setIsLoopEnabled(true);
+    setCompareViewMode('grid');
+    setPlaybackRate(DEFAULT_PLAYBACK_RATE);
+    setActiveTileIndex(0);
+    setLayout(1);
+    setSyncOffsets(Array(MAX_SLOTS).fill(0));
+    setZoomLevels(Array(MAX_SLOTS).fill(1));
+    setPanPositions(Array.from({ length: MAX_SLOTS }, () => ({ x: 0, y: 0 })));
+  }, []);
 
   const loadLibrary = useCallback(async () => {
     try {
@@ -302,11 +349,35 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         return prev.filter(v => v.id !== id);
       });
       setSlots(prevSlots => {
-        const newSlots = prevSlots.map(slot => (slot?.id === id ? null : slot));
-        const requiredLayout = getRequiredLayoutForSlots(newSlots);
+        const removedSlots = prevSlots.map(slot => (slot?.id === id ? null : slot));
+        const { compacted, remap } = compactSlots(removedSlots);
+        const requiredLayout = getRequiredLayoutForSlots(compacted);
+
+        setSyncOffsets(prev => {
+          const next = Array(MAX_SLOTS).fill(0);
+          remap.forEach((oldIndex, newIndex) => {
+            next[newIndex] = prev[oldIndex] ?? 0;
+          });
+          return next;
+        });
+        setZoomLevels(prev => {
+          const next = Array(MAX_SLOTS).fill(1);
+          remap.forEach((oldIndex, newIndex) => {
+            next[newIndex] = prev[oldIndex] ?? 1;
+          });
+          return next;
+        });
+        setPanPositions(prev => {
+          const next = Array.from({ length: MAX_SLOTS }, () => ({ x: 0, y: 0 }));
+          remap.forEach((oldIndex, newIndex) => {
+            next[newIndex] = prev[oldIndex] ?? { x: 0, y: 0 };
+          });
+          return next;
+        });
+
         setLayout(requiredLayout);
-        setActiveTileIndex(prev => (prev === null || prev >= requiredLayout ? 0 : prev));
-        return newSlots;
+        setActiveTileIndex(prev => getNextActiveTileIndex(prev, remap));
+        return compacted;
       });
       toast({ title: "Video Removed" });
     } catch (error) {
@@ -316,6 +387,44 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const setSlot = (index: number, video: Video | null) => {
+    if (video === null) {
+      setSlots(prevSlots => {
+        if (index < 0 || index >= MAX_SLOTS) return prevSlots;
+
+        const removedSlots = [...prevSlots];
+        removedSlots[index] = null;
+        const { compacted, remap } = compactSlots(removedSlots);
+        const requiredLayout = getRequiredLayoutForSlots(compacted);
+
+        setSyncOffsets(prev => {
+          const next = Array(MAX_SLOTS).fill(0);
+          remap.forEach((oldIndex, newIndex) => {
+            next[newIndex] = prev[oldIndex] ?? 0;
+          });
+          return next;
+        });
+        setZoomLevels(prev => {
+          const next = Array(MAX_SLOTS).fill(1);
+          remap.forEach((oldIndex, newIndex) => {
+            next[newIndex] = prev[oldIndex] ?? 1;
+          });
+          return next;
+        });
+        setPanPositions(prev => {
+          const next = Array.from({ length: MAX_SLOTS }, () => ({ x: 0, y: 0 }));
+          remap.forEach((oldIndex, newIndex) => {
+            next[newIndex] = prev[oldIndex] ?? { x: 0, y: 0 };
+          });
+          return next;
+        });
+
+        setLayout(requiredLayout);
+        setActiveTileIndex(prev => getNextActiveTileIndex(prev, remap));
+        return compacted;
+      });
+      return;
+    }
+
     setSlots(prevSlots => {
       const newSlots = [...prevSlots];
       if (index >= 0 && index < MAX_SLOTS) {
@@ -386,6 +495,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const clampUnit = (value: number) => Math.max(0, Math.min(1, value));
   const clampFps = (value: number) => Math.max(5, Math.min(60, Math.round(value)));
+  const clampPoseLabelScale = (value: number) => {
+    if (!Number.isFinite(value)) return 1;
+    return Math.max(0.7, Math.min(2, value));
+  };
 
   const handleSetPoseMinVisibility = (value: number) => {
     setPoseMinVisibility(clampUnit(value));
@@ -405,6 +518,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const handleSetPoseMinTrackingConfidence = (value: number) => {
     setPoseMinTrackingConfidence(clampUnit(value));
+  };
+
+  const handleSetPoseLabelScale = (value: number) => {
+    setPoseLabelScale(clampPoseLabelScale(value));
   };
 
   const updateSyncOffset = useCallback((index: number, delta: number) => {
@@ -464,6 +581,14 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       setCompareViewMode('grid');
     }
   }, [canUseOverlayComparison, compareViewMode]);
+
+  useEffect(() => {
+    const hasAnyGridVideo = slots.some((slot) => slot !== null);
+    if (!hasAnyGridVideo && hadAnyGridVideoRef.current) {
+      resetTransientGridControls();
+    }
+    hadAnyGridVideoRef.current = hasAnyGridVideo;
+  }, [resetTransientGridControls, slots]);
 
   const buildPoseCacheKeyForVideo = useCallback((video: Video, modelVariant?: PoseModelVariant): PoseAnalysisCacheKey => {
     const trimStartSec = Number.isFinite(video.trimStart) ? Math.max(0, video.trimStart ?? 0) : 0;
@@ -875,6 +1000,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseShowBodyLean,
     poseShowJumpHeight,
     setPoseShowJumpHeight,
+    poseLabelScale,
+    setPoseLabelScale: handleSetPoseLabelScale,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

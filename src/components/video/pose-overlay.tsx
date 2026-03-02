@@ -262,6 +262,7 @@ interface PoseOverlayProps {
   showJointAngles: boolean;
   showBodyLean: boolean;
   showJumpHeight: boolean;
+  labelScale: number;
   minPoseDetectionConfidence: number;
   minPosePresenceConfidence: number;
   minTrackingConfidence: number;
@@ -386,53 +387,45 @@ const getAngleLabelPosition = (angle: JointAngle, radius: number) => {
   };
 };
 
-type CoGAxisKey = 'x' | 'y' | 'z';
-
-interface CoGSample {
+interface LeanSample {
   tMs: number;
-  x: number;
-  y: number;
-  z: number;
+  leanDeg: number;
 }
 
-interface CoGSeriesPath {
+interface LeanSeriesPath {
   d: string;
   latest: number;
   min: number;
   max: number;
+  zeroY: number;
 }
 
-const COG_CHART_WINDOW_MS = 8000;
-const COG_CHART_WIDTH = 260;
-const COG_CHART_HEIGHT = 58;
-const COG_CHARTS: Array<{ key: CoGAxisKey; label: string }> = [
-  { key: 'x', label: 'X' },
-  { key: 'y', label: 'Y' },
-  { key: 'z', label: 'Z' },
-];
+const BODY_LEAN_CHART_WINDOW_MS = 8000;
+const BODY_LEAN_CHART_WIDTH = 260;
+const BODY_LEAN_CHART_HEIGHT = 86;
 
-const COG_DEPTH_INDICES = [11, 12, 23, 24] as const;
-
-const buildCoGSeriesPath = (
-  samples: CoGSample[],
-  axis: CoGAxisKey,
+const buildLeanSeriesPath = (
+  samples: LeanSample[],
   width: number,
   height: number
-): CoGSeriesPath | null => {
+): LeanSeriesPath | null => {
   if (samples.length < 2) return null;
   const start = samples[0].tMs;
   const end = samples[samples.length - 1].tMs;
   const rangeT = Math.max(1, end - start);
-  const values = samples.map((sample) => sample[axis]);
+  const values = samples.map((sample) => sample.leanDeg);
   let min = Math.min(...values);
   let max = Math.max(...values);
   if (!Number.isFinite(min) || !Number.isFinite(max)) {
     return null;
   }
 
-  if (Math.abs(max - min) < 1e-6) {
-    min -= 0.5;
-    max += 0.5;
+  min = Math.min(min, 0);
+  max = Math.max(max, 0);
+
+  if (Math.abs(max - min) < 1e-3) {
+    min -= 1;
+    max += 1;
   }
   const padding = (max - min) * 0.08;
   min -= padding;
@@ -441,30 +434,19 @@ const buildCoGSeriesPath = (
 
   const points = samples.map((sample) => {
     const tx = ((sample.tMs - start) / rangeT) * width;
-    const ty = height - ((sample[axis] - min) / valueRange) * height;
+    const ty = height - ((sample.leanDeg - min) / valueRange) * height;
     return `${tx.toFixed(2)},${ty.toFixed(2)}`;
   });
+
+  const zeroY = height - ((0 - min) / valueRange) * height;
 
   return {
     d: `M ${points.join(' L ')}`,
     latest: values[values.length - 1],
     min,
     max,
+    zeroY,
   };
-};
-
-const computePoseDepth = (pose: NormalizedLandmark[] | null): number => {
-  if (!pose || pose.length === 0) return 0;
-  const preferredDepth = COG_DEPTH_INDICES
-    .map((index) => pose[index]?.z)
-    .filter((value): value is number => Number.isFinite(value));
-  const fallbackDepth = pose
-    .map((landmark) => landmark?.z)
-    .filter((value): value is number => Number.isFinite(value));
-  const candidates = preferredDepth.length > 0 ? preferredDepth : fallbackDepth;
-  if (candidates.length === 0) return 0;
-  const sum = candidates.reduce((acc, value) => acc + value, 0);
-  return sum / candidates.length;
 };
 
 export default function PoseOverlay({
@@ -487,13 +469,15 @@ export default function PoseOverlay({
   showJointAngles,
   showBodyLean,
   showJumpHeight,
+  labelScale,
   minPoseDetectionConfidence,
   minPosePresenceConfidence,
   minTrackingConfidence,
 }: PoseOverlayProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const jumpHeightStateRef = useRef<JumpHeightState>(createJumpHeightState());
-  const [cogSamples, setCogSamples] = useState<CoGSample[]>([]);
+  const [leanSamples, setLeanSamples] = useState<LeanSample[]>([]);
+  const lastLeanSampleRef = useRef<LeanSample | null>(null);
 
   const {
     status,
@@ -542,9 +526,6 @@ export default function PoseOverlay({
   // Always auto-select the most prominent pose
   const selectedPoseIndex = getAutoPoseIndex(projectedPoses);
   const selectedPose = selectedPoseIndex >= 0 ? projectedPoses[selectedPoseIndex] : null;
-  const selectedRawPose = selectedPoseIndex >= 0 && selectedPoseIndex < poses.length
-    ? poses[selectedPoseIndex]
-    : null;
   const isYoloModel = modelVariant.startsWith('yolo');
   const analyzeEtaLabel = analysisEtaSec !== null
     ? `${Math.max(0, Math.ceil(analysisEtaSec))}s left`
@@ -585,51 +566,62 @@ export default function PoseOverlay({
 
   // ── Biomechanics computations (only when individually enabled) ──
   const cog = useMemo(
-    () => ((showCoG || showJumpHeight || showCoGCharts) && selectedPose ? computeCoG(selectedPose) : null),
-    [selectedPose, showCoG, showCoGCharts, showJumpHeight]
+    () => ((showCoG || showJumpHeight) && selectedPose ? computeCoG(selectedPose) : null),
+    [selectedPose, showCoG, showJumpHeight]
   );
-  const cogDepth = useMemo(() => computePoseDepth(selectedRawPose), [selectedRawPose]);
   const jointAngles = showJointAngles && selectedPose ? computeJointAngles(selectedPose) : [];
-  const bodyLean = showBodyLean && selectedPose ? computeBodyLean(selectedPose) : null;
+  const bodyLean = useMemo(
+    () => ((showBodyLean || showCoGCharts) && selectedPose ? computeBodyLean(selectedPose) : null),
+    [selectedPose, showBodyLean, showCoGCharts]
+  );
+  const bodyLeanAngleDeg = bodyLean?.angleDeg ?? null;
   const jumpHeight = showJumpHeight && cog
     ? updateJumpHeight(jumpHeightStateRef.current, cog, sourceHeight, mediaTimeMs)
     : null;
 
+  const safeLabelScale = Number.isFinite(labelScale) ? Math.max(0.7, Math.min(2, labelScale)) : 1;
   const arcRadius = Math.max(16, sourceWidth * 0.025);
-  const fontSize = Math.max(10, sourceWidth * 0.012);
+  const fontSize = Math.max(10, sourceWidth * 0.012 * safeLabelScale);
+  const chartTitleFontSize = Math.max(10, 10 * safeLabelScale);
+  const chartAxisFontSize = Math.max(10, 11 * safeLabelScale);
+  const chartValueFontSize = Math.max(9, 10 * safeLabelScale);
+  const hudFontSize = Math.max(10, 10 * safeLabelScale);
   const limbLegendItems: Array<{ label: string; limb: LimbKey }> = [
     { label: 'L Arm', limb: 'leftArm' },
     { label: 'R Arm', limb: 'rightArm' },
     { label: 'L Leg', limb: 'leftLeg' },
     { label: 'R Leg', limb: 'rightLeg' },
   ];
-  const cogChartSeries = useMemo<Record<CoGAxisKey, CoGSeriesPath | null>>(
-    () => ({
-      x: buildCoGSeriesPath(cogSamples, 'x', COG_CHART_WIDTH, COG_CHART_HEIGHT),
-      y: buildCoGSeriesPath(cogSamples, 'y', COG_CHART_WIDTH, COG_CHART_HEIGHT),
-      z: buildCoGSeriesPath(cogSamples, 'z', COG_CHART_WIDTH, COG_CHART_HEIGHT),
-    }),
-    [cogSamples]
+  const leanChartSeries = useMemo(
+    () => buildLeanSeriesPath(leanSamples, BODY_LEAN_CHART_WIDTH, BODY_LEAN_CHART_HEIGHT),
+    [leanSamples]
   );
 
   useEffect(() => {
     if (!enabled) {
-      setCogSamples([]);
+      setLeanSamples([]);
+      lastLeanSampleRef.current = null;
     }
   }, [enabled]);
 
   useEffect(() => {
-    if (!enabled || !showCoGCharts || !cog) return;
-    const normalizedX = sourceWidth > 0 ? cog.x / sourceWidth : 0;
-    const normalizedY = sourceHeight > 0 ? cog.y / sourceHeight : 0;
-    const sample: CoGSample = {
+    if (!enabled || !showCoGCharts || bodyLeanAngleDeg === null) return;
+    if (!Number.isFinite(mediaTimeMs) || !Number.isFinite(bodyLeanAngleDeg)) return;
+    const sample: LeanSample = {
       tMs: mediaTimeMs,
-      x: normalizedX,
-      y: normalizedY,
-      z: cogDepth,
+      leanDeg: bodyLeanAngleDeg,
     };
 
-    setCogSamples((prev) => {
+    const lastSample = lastLeanSampleRef.current;
+    if (
+      lastSample &&
+      Math.abs(sample.tMs - lastSample.tMs) <= 1 &&
+      Math.abs(sample.leanDeg - lastSample.leanDeg) < 1e-4
+    ) {
+      return;
+    }
+
+    setLeanSamples((prev) => {
       if (prev.length === 0) return [sample];
       const last = prev[prev.length - 1];
       if (sample.tMs < last.tMs - 1) {
@@ -637,11 +629,7 @@ export default function PoseOverlay({
         return [sample];
       }
       if (Math.abs(sample.tMs - last.tMs) <= 1) {
-        const unchanged = (
-          Math.abs(last.x - sample.x) < 1e-6 &&
-          Math.abs(last.y - sample.y) < 1e-6 &&
-          Math.abs(last.z - sample.z) < 1e-6
-        );
+        const unchanged = Math.abs(last.leanDeg - sample.leanDeg) < 1e-4;
         if (unchanged) {
           return prev;
         }
@@ -650,13 +638,14 @@ export default function PoseOverlay({
         return next;
       }
       const next = [...prev, sample];
-      const cutoff = sample.tMs - COG_CHART_WINDOW_MS;
+      const cutoff = sample.tMs - BODY_LEAN_CHART_WINDOW_MS;
       while (next.length > 2 && next[0].tMs < cutoff) {
         next.shift();
       }
       return next;
     });
-  }, [cog, cogDepth, enabled, mediaTimeMs, showCoGCharts, sourceHeight, sourceWidth]);
+    lastLeanSampleRef.current = sample;
+  }, [bodyLeanAngleDeg, enabled, mediaTimeMs, showCoGCharts]);
 
   if (!enabled) return null;
 
@@ -936,61 +925,59 @@ export default function PoseOverlay({
         )}
       </svg>
 
-      {showCoGCharts && cogSamples.length >= 2 ? (
+      {showCoGCharts && leanSamples.length >= 2 && leanChartSeries ? (
         <div className="absolute right-2 top-14 w-[320px] rounded-md border border-white/15 bg-black/45 p-2 backdrop-blur-sm">
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-white/90">
-            CoG Movement vs Time ({(COG_CHART_WINDOW_MS / 1000).toFixed(0)}s window)
+          <div
+            className="mb-1 font-semibold uppercase tracking-[0.08em] text-white/90"
+            style={{ fontSize: `${chartTitleFontSize}px` }}
+          >
+            Body Lean vs Time ({(BODY_LEAN_CHART_WINDOW_MS / 1000).toFixed(0)}s window)
           </div>
-          <div className="space-y-1.5">
-            {COG_CHARTS.map((axis) => {
-              const series = cogChartSeries[axis.key];
-              return (
-                <div key={`cog-chart-${axis.key}`} className="flex items-center gap-2">
-                  <div className="w-4 text-[11px] font-semibold uppercase text-white/80">{axis.label}</div>
-                  <svg width={COG_CHART_WIDTH} height={COG_CHART_HEIGHT} className="rounded-sm bg-black/45">
-                    <line
-                      x1={0}
-                      y1={COG_CHART_HEIGHT / 2}
-                      x2={COG_CHART_WIDTH}
-                      y2={COG_CHART_HEIGHT / 2}
-                      stroke="rgba(255,255,255,0.18)"
-                      strokeDasharray="3 3"
-                    />
-                    {series ? (
-                      <>
-                        <path
-                          d={series.d}
-                          fill="none"
-                          stroke="rgba(255,255,255,0.92)"
-                          strokeWidth={1.6}
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                        <text
-                          x={COG_CHART_WIDTH - 4}
-                          y={12}
-                          textAnchor="end"
-                          fill="rgba(255,255,255,0.75)"
-                          fontSize={10}
-                          fontWeight={600}
-                        >
-                          {series.latest.toFixed(3)}
-                        </text>
-                      </>
-                    ) : null}
-                  </svg>
-                </div>
-              );
-            })}
+          <div className="flex items-center gap-2">
+            <div
+              className="w-9 font-semibold uppercase text-white/80"
+              style={{ fontSize: `${chartAxisFontSize}px` }}
+            >
+              Lean
+            </div>
+            <svg width={BODY_LEAN_CHART_WIDTH} height={BODY_LEAN_CHART_HEIGHT} className="rounded-sm bg-black/45">
+              <line
+                x1={0}
+                y1={leanChartSeries.zeroY}
+                x2={BODY_LEAN_CHART_WIDTH}
+                y2={leanChartSeries.zeroY}
+                stroke="rgba(255,255,255,0.18)"
+                strokeDasharray="3 3"
+              />
+              <path
+                d={leanChartSeries.d}
+                fill="none"
+                stroke="rgba(34,211,238,0.92)"
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <text
+                x={BODY_LEAN_CHART_WIDTH - 4}
+                y={12}
+                textAnchor="end"
+                fill="rgba(255,255,255,0.82)"
+                fontSize={chartValueFontSize}
+                fontWeight={600}
+              >
+                {`${leanChartSeries.latest.toFixed(1)}°`}
+              </text>
+            </svg>
           </div>
         </div>
       ) : null}
 
       <div
         className={cn(
-          'absolute left-2 top-2 rounded-md px-2 py-1 text-[10px] font-semibold text-white/90 backdrop-blur-sm pointer-events-auto',
+          'absolute left-2 top-2 rounded-md px-2 py-1 font-semibold text-white/90 backdrop-blur-sm pointer-events-auto',
           status === 'error' ? 'bg-red-950/70' : 'bg-black/45'
         )}
+        style={{ fontSize: `${hudFontSize}px` }}
       >
         {status === 'error' ? (
           `Pose error: ${error ?? 'unknown'}`
@@ -1000,7 +987,7 @@ export default function PoseOverlay({
               {`Pose ${analysisModeLabel} · ${(activeModel ?? modelVariant).toUpperCase()} · ${delegate ?? '...'} · ${inferenceFps.toFixed(1)} fps · poses:${poseCount} · lm:${landmarkCount} vis:${visibleLandmarkCount}`}
             </span>
             {drawPose ? (
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-white/90">
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-white/90" style={{ fontSize: `${hudFontSize}px` }}>
                 {limbLegendItems.map((item) => {
                   const color = selectedStrain
                     ? getLimbColor(item.limb, selectedStrain[item.limb])
