@@ -54,8 +54,6 @@ const ORT_CDN_BUNDLE_MODULE_URL =
     `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNX_RUNTIME_VERSION}/dist/ort.bundle.min.mjs`;
 
 export class OnnxPoseDelegate {
-    private static readonly TARGET_SIZE = 640;
-    private static readonly PIXEL_COUNT = OnnxPoseDelegate.TARGET_SIZE * OnnxPoseDelegate.TARGET_SIZE;
     private static readonly YOLO_KEYPOINT_COUNT = 17;
     private static readonly FEATURES_PER_KEYPOINT = 3;
     private static readonly DEFAULT_MIN_CONFIDENCE = 0.25;
@@ -67,16 +65,42 @@ export class OnnxPoseDelegate {
     private ctx: CanvasRenderingContext2D;
     private ort: typeof import('onnxruntime-web') | null = null;
     private executionProvider: 'webgpu' | 'wasm' | null = null;
-    private readonly inputData = new Float32Array(OnnxPoseDelegate.PIXEL_COUNT * 3);
+    private targetSize: number;
+    private pixelCount: number;
+    private inputData: Float32Array;
     private inputTensor: import('onnxruntime-web').Tensor | null = null;
     private inputName: string | null = null;
     private readonly feeds: Record<string, import('onnxruntime-web').Tensor> = {};
 
-    constructor() {
+    constructor(inputSize = 640) {
+        this.targetSize = Math.max(128, Math.round(inputSize));
+        this.pixelCount = this.targetSize * this.targetSize;
+        this.inputData = new Float32Array(this.pixelCount * 3);
         this.canvas = document.createElement('canvas');
-        this.canvas.width = OnnxPoseDelegate.TARGET_SIZE;
-        this.canvas.height = OnnxPoseDelegate.TARGET_SIZE;
+        this.canvas.width = this.targetSize;
+        this.canvas.height = this.targetSize;
         this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    }
+
+    private rebuildInputTensor() {
+        if (!this.ort || !this.session || !this.inputName) return;
+        this.inputTensor?.dispose();
+        this.inputTensor = new this.ort.Tensor(
+            'float32',
+            this.inputData,
+            [1, 3, this.targetSize, this.targetSize]
+        );
+    }
+
+    private setInputSize(inputSize: number) {
+        const nextSize = Math.max(128, Math.round(inputSize));
+        if (nextSize === this.targetSize) return;
+        this.targetSize = nextSize;
+        this.pixelCount = this.targetSize * this.targetSize;
+        this.canvas.width = this.targetSize;
+        this.canvas.height = this.targetSize;
+        this.inputData = new Float32Array(this.pixelCount * 3);
+        this.rebuildInputTensor();
     }
 
     private async importOrtModule(): Promise<OrtModule> {
@@ -128,9 +152,10 @@ export class OnnxPoseDelegate {
         );
     }
 
-    async initialize(modelPath: string) {
+    async initialize(modelPath: string, inputSize = 640) {
         if (this.session || this.isInitializing) return;
         this.isInitializing = true;
+        this.setInputSize(inputSize);
 
         try {
             if (!this.ort) {
@@ -187,11 +212,7 @@ export class OnnxPoseDelegate {
 
             if (this.session) {
                 this.inputName = this.session.inputNames[0] ?? null;
-                this.inputTensor = new this.ort.Tensor(
-                    'float32',
-                    this.inputData,
-                    [1, 3, OnnxPoseDelegate.TARGET_SIZE, OnnxPoseDelegate.TARGET_SIZE]
-                );
+                this.rebuildInputTensor();
             }
         } catch (error) {
             console.error('[ONNX] Failed to load model:', error);
@@ -259,7 +280,7 @@ export class OnnxPoseDelegate {
 
     private preprocess(video: HTMLVideoElement): import('onnxruntime-web').Tensor {
         const { videoWidth, videoHeight } = video;
-        const targetSize = OnnxPoseDelegate.TARGET_SIZE;
+        const targetSize = this.targetSize;
 
         // Calculate scale to maintain aspect ratio
         const scale = Math.min(targetSize / videoWidth, targetSize / videoHeight);
@@ -287,8 +308,8 @@ export class OnnxPoseDelegate {
 
         // BCHW format
         let rIndex = 0;
-        let gIndex = OnnxPoseDelegate.PIXEL_COUNT;
-        let bIndex = OnnxPoseDelegate.PIXEL_COUNT * 2;
+        let gIndex = this.pixelCount;
+        let bIndex = this.pixelCount * 2;
 
         for (let i = 0; i < dataLength; i += 4) {
             float32Data[rIndex++] = data[i] * inv255;     // R
@@ -413,7 +434,7 @@ export class OnnxPoseDelegate {
         // During preprocess, we letterboxed the image into a 640x640 square.
         // We scaled it by `scale`, then centered it with `dx` and `dy` padding.
         // We need to reverse this exactly to map back to the original video coordinates.
-        const targetSize = OnnxPoseDelegate.TARGET_SIZE;
+        const targetSize = this.targetSize;
         const scale = Math.min(targetSize / originalWidth, targetSize / originalHeight);
 
         // The *padded* dimensions on the 640x640 canvas (before centering)

@@ -18,6 +18,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { useAppContext, type OverlayBlendMode, type OverlayColorFilter } from '@/contexts/app-context';
+import { POSE_ANGLE_METRICS } from '@/lib/pose/pose-angle-metrics';
 import { cn } from '@/lib/utils';
 import type { DrawingType, PoseAnalyzeScope } from '@/types';
 
@@ -81,14 +82,18 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
         setPoseShowCoG,
         poseShowCoGCharts,
         setPoseShowCoGCharts,
-        poseShowJointAngles,
-        setPoseShowJointAngles,
+        poseVisibleAngles,
+        setPoseAngleVisible,
+        posePlottedAngles,
+        setPoseAnglePlotted,
         poseShowBodyLean,
         setPoseShowBodyLean,
         poseShowJumpHeight,
         setPoseShowJumpHeight,
         poseLabelScale,
         setPoseLabelScale,
+        poseBackgroundBlackout,
+        setPoseBackgroundBlackout,
         isSyncDrawingsEnabled,
         toggleSyncDrawings,
         // View controls
@@ -512,7 +517,14 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                         <span>Label Size</span>
                                         <span>{Math.round(poseLabelScale * 100)}%</span>
                                     </div>
-                                    <Slider value={[poseLabelScale]} min={0.7} max={2} step={0.05} onValueChange={([v]) => setPoseLabelScale(v)} />
+                                    <Slider value={[poseLabelScale]} min={0.7} max={3} step={0.05} onValueChange={([v]) => setPoseLabelScale(v)} />
+                                </div>
+                                <div className="space-y-1">
+                                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                        <span>Background Blackout</span>
+                                        <span>{Math.round(poseBackgroundBlackout * 100)}%</span>
+                                    </div>
+                                    <Slider value={[poseBackgroundBlackout]} min={0} max={1} step={0.05} onValueChange={([v]) => setPoseBackgroundBlackout(v)} />
                                 </div>
                             </div>
 
@@ -521,7 +533,6 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                 {[
                                     { label: 'Center of Gravity', desc: 'Segment-weighted body mass center marker', value: poseShowCoG, set: setPoseShowCoG },
                                     { label: 'Body Lean Chart', desc: 'True-time torso lean angle curve overlaid on video', value: poseShowCoGCharts, set: setPoseShowCoGCharts },
-                                    { label: 'Joint Angles', desc: 'Knee, hip & elbow angle arcs', value: poseShowJointAngles, set: setPoseShowJointAngles },
                                     { label: 'Body Lean', desc: 'Torso tilt from vertical', value: poseShowBodyLean, set: setPoseShowBodyLean },
                                     { label: 'Jump Height', desc: 'Vertical displacement from baseline', value: poseShowJumpHeight, set: setPoseShowJumpHeight },
                                 ].map(({ label, desc, value, set }) => (
@@ -533,6 +544,45 @@ export default function DrawingToolbar({ className }: DrawingToolbarProps) {
                                         <Switch checked={value} onCheckedChange={set} />
                                     </div>
                                 ))}
+                                <div className="rounded-md border border-border/60 bg-secondary/30 p-2">
+                                    <div className="mb-2">
+                                        <p className="text-[11px] font-medium text-foreground">Joint Angles</p>
+                                        <p className="text-[10px] text-muted-foreground/80">
+                                            Choose which knee, hip and elbow angles render on the pose diagram or plot over time
+                                        </p>
+                                    </div>
+                                    <div className="mb-1 grid grid-cols-[1fr_auto_auto] items-center gap-3 px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80">
+                                        <span>Angle</span>
+                                        <span>Show</span>
+                                        <span>Plot</span>
+                                    </div>
+                                    <div className="space-y-1">
+                                        {POSE_ANGLE_METRICS.map((metric) => (
+                                            <div
+                                                key={metric.id}
+                                                className="grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-md border border-border/50 bg-background/20 px-2 py-1.5"
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <span
+                                                        className="inline-block h-2 w-2 rounded-full"
+                                                        style={{ backgroundColor: metric.chartColor }}
+                                                    />
+                                                    <span className="text-[11px] font-medium text-foreground">{metric.label}</span>
+                                                </div>
+                                                <Switch
+                                                    checked={poseVisibleAngles[metric.id]}
+                                                    onCheckedChange={(checked) => setPoseAngleVisible(metric.id, checked)}
+                                                    aria-label={`Show ${metric.label}`}
+                                                />
+                                                <Switch
+                                                    checked={posePlottedAngles[metric.id]}
+                                                    onCheckedChange={(checked) => setPoseAnglePlotted(metric.id, checked)}
+                                                    aria-label={`Plot ${metric.label}`}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </PopoverContent>

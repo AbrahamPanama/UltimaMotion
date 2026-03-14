@@ -7,6 +7,7 @@ export interface PoseRuntimeConfig {
   modelVariant: PoseModelVariant;
   numPoses: number;
   yoloMultiPerson: boolean;
+  preprocessInputSize?: number;
   minPoseDetectionConfidence: number;
   minPosePresenceConfidence: number;
   minTrackingConfidence: number;
@@ -49,6 +50,7 @@ export class PoseRuntime {
   private appliedOptionsKey = '';
   private initPromise: Promise<void> | null = null;
   private onnxDelegate: OnnxPoseDelegate | null = null;
+  private onnxInputSize = 640;
   private lastTimestampMs = -1;
   private needsTrackerReset = false;
 
@@ -163,12 +165,16 @@ export class PoseRuntime {
       await this.initPromise;
     }
 
-    const needsModelReload = !this.onnxDelegate || this.modelVariant !== config.modelVariant;
+    const requestedInputSize = Math.max(128, Math.round(config.preprocessInputSize ?? 640));
+    const needsModelReload =
+      !this.onnxDelegate ||
+      this.modelVariant !== config.modelVariant ||
+      this.onnxInputSize !== requestedInputSize;
 
     if (needsModelReload) {
       this.initPromise = (async () => {
         this.onnxDelegate?.close();
-        this.onnxDelegate = new OnnxPoseDelegate();
+        this.onnxDelegate = new OnnxPoseDelegate(requestedInputSize);
 
         const modelPath = MODEL_PATHS[config.modelVariant];
         if (!modelPath.endsWith('.onnx')) {
@@ -177,11 +183,12 @@ export class PoseRuntime {
         const absoluteUrl = new URL(modelPath, window.location.origin).href;
         await this.assertOnnxModelExists(absoluteUrl);
 
-        await this.onnxDelegate.initialize(absoluteUrl);
+        await this.onnxDelegate.initialize(absoluteUrl, requestedInputSize);
 
         const onnxProvider = this.onnxDelegate.getExecutionProvider();
         this.delegate = onnxProvider === 'webgpu' ? 'WEBGPU-ONNX' : 'WASM-ONNX';
         this.modelVariant = config.modelVariant;
+        this.onnxInputSize = requestedInputSize;
       })();
 
       try {
@@ -249,6 +256,7 @@ export class PoseRuntime {
     this.appliedOptionsKey = '';
     this.modelVariant = null;
     this.delegate = null;
+    this.onnxInputSize = 640;
     this.lastTimestampMs = -1;
     this.needsTrackerReset = false;
   }

@@ -56,8 +56,10 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     isPoseEnabled,
     getPoseProcessingState,
     setPoseModelVariant,
+    setPosePreprocessPreset,
     poseAnalyzeScope,
     poseModelVariant,
+    posePreprocessPreset,
     poseMinVisibility,
     poseTargetFps,
     poseUseExactFrameSync,
@@ -65,10 +67,12 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
     poseUseYoloMultiPerson,
     poseShowCoG,
     poseShowCoGCharts,
-    poseShowJointAngles,
+    poseVisibleAngles,
+    posePlottedAngles,
     poseShowBodyLean,
     poseShowJumpHeight,
     poseLabelScale,
+    poseBackgroundBlackout,
     poseMinPoseDetectionConfidence,
     poseMinPosePresenceConfidence,
     poseMinTrackingConfidence
@@ -303,6 +307,9 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
         return;
       }
       setPoseModelVariant(poseState.modelVariant);
+      if (poseState.preprocessPreset) {
+        setPosePreprocessPreset(poseState.preprocessPreset);
+      }
     }
     const existingSlotIndex = slots.findIndex(
       (slot, slotIndex) => slotIndex !== index && slot?.id === selectedVideo.id
@@ -586,6 +593,14 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
           playsInline
         />
 
+        {shouldAnalyzePose && poseBackgroundBlackout > 0 && (
+          <div
+            className="absolute inset-0 pointer-events-none z-[1]"
+            style={{ backgroundColor: `rgba(0, 0, 0, ${poseBackgroundBlackout})` }}
+            aria-hidden="true"
+          />
+        )}
+
         {/* Drawing Canvas Overlay */}
         {video && (
           <PoseOverlay
@@ -595,6 +610,7 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
             position={position}
             objectFit={isPortraitMode ? 'cover' : 'contain'}
             modelVariant={poseModelVariant}
+            preprocessPreset={posePreprocessPreset}
             videoId={video?.id ?? null}
             trimStartSec={video?.trimStart ?? 0}
             trimEndSec={video?.trimEnd ?? null}
@@ -605,7 +621,8 @@ export default function VideoTile({ video, index, isActive }: VideoTileProps) {
             minVisibility={poseMinVisibility}
             showCoG={poseShowCoG}
             showCoGCharts={poseShowCoGCharts}
-            showJointAngles={poseShowJointAngles}
+            visibleAngles={poseVisibleAngles}
+            plottedAngles={posePlottedAngles}
             showBodyLean={poseShowBodyLean}
             showJumpHeight={poseShowJumpHeight}
             labelScale={poseLabelScale}

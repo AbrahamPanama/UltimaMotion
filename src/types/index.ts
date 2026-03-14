@@ -22,6 +22,15 @@ export type PoseModelVariant =
   | 'yolo26-medium'
   | 'yolo26-large'
   | 'yolo26-xlarge';
+export type PosePreprocessPresetId = 'accurate' | 'balanced' | 'fast';
+export type PoseAngleMetricId =
+  | 'left-knee'
+  | 'right-knee'
+  | 'left-hip'
+  | 'right-hip'
+  | 'left-elbow'
+  | 'right-elbow';
+export type PoseAngleSelectionMap = Record<PoseAngleMetricId, boolean>;
 export type PoseAnalyzeScope = 'active-tile' | 'all-visible';
 
 export interface Point {

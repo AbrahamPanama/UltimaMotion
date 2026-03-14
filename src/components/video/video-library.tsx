@@ -14,7 +14,11 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAppContext } from '@/contexts/app-context';
 import { extractThumbnail } from '@/lib/video-utils';
-import { getPoseProcessModelLabel, POSE_PROCESS_MODEL_OPTIONS } from '@/lib/pose/pose-model-label';
+import {
+  getPoseProcessModelLabel,
+  POSE_PROCESS_MENU_OPTIONS,
+} from '@/lib/pose/pose-model-label';
+import { formatPoseProcessingLabel } from '@/lib/pose/pose-preprocess-preset';
 import { FilePlus, Trash2, PlusCircle, Video, Loader2, CheckCircle2, AlertTriangle, Square, Star } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { VideoRecorder } from './video-recorder';
@@ -26,7 +30,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { PoseModelVariant } from '@/types';
+import type { PoseModelVariant, PosePreprocessPresetId } from '@/types';
 
 export function VideoLibrary() {
   const DUPLICATE_ADD_WINDOW_MS = 450;
@@ -40,6 +44,7 @@ export function VideoLibrary() {
     processPoseForVideo,
     getPoseProcessingState,
     setPoseModelVariant,
+    setPosePreprocessPreset,
     cancelPoseProcessing,
     toggleFavorite,
   } = useAppContext();
@@ -146,6 +151,9 @@ export function VideoLibrary() {
         return;
       }
       setPoseModelVariant(poseState.modelVariant);
+      if (poseState.preprocessPreset) {
+        setPosePreprocessPreset(poseState.preprocessPreset);
+      }
     }
 
     const existingSlotIndex = slots.findIndex((slot) => slot?.id === video.id);
@@ -165,11 +173,16 @@ export function VideoLibrary() {
     }
   };
 
-  const handleProcessPose = async (video: import('@/types').Video, modelVariant: PoseModelVariant) => {
-    const ok = await processPoseForVideo(video, modelVariant);
+  const handleProcessPose = async (
+    video: import('@/types').Video,
+    modelVariant: PoseModelVariant,
+    preprocessPreset: PosePreprocessPresetId
+  ) => {
+    const ok = await processPoseForVideo(video, modelVariant, preprocessPreset);
     if (ok) {
       setPoseModelVariant(modelVariant);
-      toast({ title: `Pose Ready (${getPoseProcessModelLabel(modelVariant)})` });
+      setPosePreprocessPreset(preprocessPreset);
+      toast({ title: `Pose Ready (${formatPoseProcessingLabel(modelVariant, preprocessPreset, getPoseProcessModelLabel)})` });
     } else {
       const state = getPoseProcessingState(video.id);
       if (state.status === 'error') {
@@ -190,7 +203,7 @@ export function VideoLibrary() {
               onClick={(e) => e.stopPropagation()}
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
-              {`Pose Ready (${getPoseProcessModelLabel(state.modelVariant)})`}
+              {`Pose Ready (${formatPoseProcessingLabel(state.modelVariant, state.preprocessPreset, getPoseProcessModelLabel)})`}
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -198,12 +211,12 @@ export function VideoLibrary() {
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            {POSE_PROCESS_MODEL_OPTIONS.map((option) => (
+            {POSE_PROCESS_MENU_OPTIONS.map((option) => (
               <DropdownMenuItem
-                key={`process-${video.id}-${option.variant}`}
+                key={`process-${video.id}-${option.variant}-${option.preset.id}`}
                 onSelect={(e) => {
                   e.stopPropagation();
-                  void handleProcessPose(video, option.variant);
+                  void handleProcessPose(video, option.variant, option.preset.id);
                 }}
               >
                 {`Reprocess ${option.label}`}
@@ -218,7 +231,7 @@ export function VideoLibrary() {
       return (
         <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-sky-500/15 px-2 py-1 text-[11px] font-semibold text-sky-300">
           <Loader2 className="h-3.5 w-3.5" />
-          <span>{`Pose queued (${getPoseProcessModelLabel(state.modelVariant)})`}</span>
+          <span>{`Pose queued (${formatPoseProcessingLabel(state.modelVariant, state.preprocessPreset, getPoseProcessModelLabel)})`}</span>
           <button
             className="inline-flex items-center gap-1 rounded border border-sky-300/40 px-1.5 py-0.5 text-[10px] hover:bg-sky-400/15"
             onClick={(e) => {
@@ -238,7 +251,7 @@ export function VideoLibrary() {
       return (
         <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-500/15 px-2 py-1 text-[11px] font-semibold text-amber-300">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>{`Pose ${Math.round(state.progress * 100)}% (${getPoseProcessModelLabel(state.modelVariant)})${state.etaSec !== null ? ` · ${Math.max(0, Math.ceil(state.etaSec))}s` : ''}`}</span>
+          <span>{`Pose ${Math.round(state.progress * 100)}% (${formatPoseProcessingLabel(state.modelVariant, state.preprocessPreset, getPoseProcessModelLabel)})${state.etaSec !== null ? ` · ${Math.max(0, Math.ceil(state.etaSec))}s` : ''}`}</span>
           <button
             className="inline-flex items-center gap-1 rounded border border-amber-300/40 px-1.5 py-0.5 text-[10px] hover:bg-amber-400/15"
             onClick={(e) => {
@@ -271,12 +284,12 @@ export function VideoLibrary() {
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            {POSE_PROCESS_MODEL_OPTIONS.map((option) => (
+            {POSE_PROCESS_MENU_OPTIONS.map((option) => (
               <DropdownMenuItem
-                key={`retry-${video.id}-${option.variant}`}
+                key={`retry-${video.id}-${option.variant}-${option.preset.id}`}
                 onSelect={(e) => {
                   e.stopPropagation();
-                  void handleProcessPose(video, option.variant);
+                  void handleProcessPose(video, option.variant, option.preset.id);
                 }}
               >
                 {`Process ${option.label}`}
@@ -302,12 +315,12 @@ export function VideoLibrary() {
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {POSE_PROCESS_MODEL_OPTIONS.map((option) => (
+          {POSE_PROCESS_MENU_OPTIONS.map((option) => (
             <DropdownMenuItem
-              key={`process-menu-${video.id}-${option.variant}`}
+              key={`process-menu-${video.id}-${option.variant}-${option.preset.id}`}
               onSelect={(e) => {
                 e.stopPropagation();
-                void handleProcessPose(video, option.variant);
+                void handleProcessPose(video, option.variant, option.preset.id);
               }}
             >
               {`Process ${option.label}`}

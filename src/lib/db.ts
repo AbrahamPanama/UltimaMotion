@@ -17,7 +17,10 @@ export interface PoseAnalysisRecord {
   id: string;
   videoId: string;
   modelVariant: string;
+  preprocessPreset: string;
   targetFps: number;
+  effectiveSampleFps: number;
+  inputSize: number;
   yoloMultiPerson: boolean;
   trimStartMs: number;
   trimEndMs: number;

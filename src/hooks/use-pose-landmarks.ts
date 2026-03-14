@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
-import type { PoseModelVariant } from '@/types';
+import type { PoseModelVariant, PosePreprocessPresetId } from '@/types';
 import {
   createPoseRuntime,
   type PoseRuntime,
@@ -18,11 +18,13 @@ import {
 } from '@/lib/pose/one-euro-filter';
 import {
   buildPoseAnalysisCacheId,
+  doesPoseAnalysisMatchKey,
   findInterpolatedPosesAtTimestamp,
   loadPoseAnalysisCache,
   type CachedPoseFrame,
   type PoseAnalysisCacheKey,
 } from '@/lib/pose/pose-analysis-cache';
+import { getPosePreprocessPreset } from '@/lib/pose/pose-preprocess-preset';
 
 type PoseStatus = 'idle' | 'loading' | 'ready' | 'error';
 type AnalysisStatus = 'idle' | 'analyzing' | 'ready' | 'error';
@@ -31,6 +33,7 @@ interface UsePoseLandmarksParams {
   enabled: boolean;
   videoElement: HTMLVideoElement | null;
   modelVariant: PoseModelVariant;
+  preprocessPreset: PosePreprocessPresetId;
   videoId: string | null;
   trimStartSec: number;
   trimEndSec: number | null;
@@ -119,6 +122,7 @@ export function usePoseLandmarks({
   enabled,
   videoElement,
   modelVariant,
+  preprocessPreset,
   videoId,
   trimStartSec,
   trimEndSec,
@@ -152,6 +156,7 @@ export function usePoseLandmarks({
   const runtimeRef = useRef<PoseRuntime | null>(null);
   const cachedFramesRef = useRef<CachedPoseFrame[] | null>(null);
   const cacheIdRef = useRef<string | null>(null);
+  const cacheSignatureRef = useRef<string | null>(null);
 
   // ── Smoothing state (lives here, NOT in render) ──
   const filterStatesRef = useRef<LandmarkFilterState[]>([]);
@@ -187,6 +192,7 @@ export function usePoseLandmarks({
       lastRenderedMediaTimeMsRef.current = -1;
       cachedFramesRef.current = null;
       cacheIdRef.current = null;
+      cacheSignatureRef.current = null;
       return;
     }
 
@@ -198,6 +204,7 @@ export function usePoseLandmarks({
       lastRenderedMediaTimeMsRef.current = -1;
       cachedFramesRef.current = null;
       cacheIdRef.current = null;
+      cacheSignatureRef.current = null;
     }
 
     const runtime = runtimeRef.current;
@@ -217,8 +224,9 @@ export function usePoseLandmarks({
 
     const targetInterval = 1000 / Math.max(1, targetFps);
     const videoWithCallback = videoElement as VideoWithFrameCallback;
-    const isYoloModel = modelVariant.startsWith('yolo');
-    const shouldUseCachedAnalysis = Boolean(isYoloModel && videoId);
+    const supportsCachedPreprocessing = modelVariant.startsWith('yolo') || modelVariant === 'heavy';
+    const shouldUseCachedAnalysis = Boolean(supportsCachedPreprocessing && videoId);
+    const preprocessConfig = getPosePreprocessPreset(preprocessPreset);
 
     const trimStartMs = Math.max(0, Math.floor((Number.isFinite(trimStartSec) ? trimStartSec : 0) * 1000));
     const resolvedTrimEndSec = Number.isFinite(trimEndSec)
@@ -232,7 +240,9 @@ export function usePoseLandmarks({
       ? {
         videoId,
         modelVariant,
-        targetFps,
+        preprocessPreset: preprocessConfig.id,
+        targetFps: preprocessConfig.targetFps,
+        inputSize: preprocessConfig.inputSize,
         yoloMultiPerson: useYoloMultiPerson,
         trimStartMs,
         trimEndMs,
@@ -258,7 +268,19 @@ export function usePoseLandmarks({
         return;
       }
       const nextCacheId = buildPoseAnalysisCacheId(cacheKey);
-      if (cacheIdRef.current === nextCacheId && cachedFramesRef.current !== null) {
+      const nextCacheSignature = [
+        nextCacheId,
+        cacheKey.modelVariant,
+        cacheKey.preprocessPreset,
+        cacheKey.targetFps,
+        cacheKey.inputSize,
+        cacheKey.yoloMultiPerson ? 1 : 0,
+      ].join('|');
+      if (
+        cacheIdRef.current === nextCacheId &&
+        cacheSignatureRef.current === nextCacheSignature &&
+        cachedFramesRef.current !== null
+      ) {
         analysisReady = true;
         const hasFrames = cachedFramesRef.current.length > 0;
         setAnalysisStatus(hasFrames ? 'ready' : 'error');
@@ -274,12 +296,13 @@ export function usePoseLandmarks({
       analysisPromise = (async () => {
         const cacheId = nextCacheId;
         cacheIdRef.current = cacheId;
+        cacheSignatureRef.current = nextCacheSignature;
         setAnalysisStatus('analyzing');
         setAnalysisProgress(0);
         setAnalysisEtaSec(null);
 
         const existing = await loadPoseAnalysisCache(cacheId);
-        if (existing && existing.frames.length > 0) {
+        if (existing && doesPoseAnalysisMatchKey(existing, cacheKey)) {
           cachedFramesRef.current = existing.frames;
           analysisReady = true;
           setAnalysisStatus('ready');
@@ -300,6 +323,7 @@ export function usePoseLandmarks({
       } catch (analysisError) {
         console.warn('[PoseAnalysis] Cached pose load failed.', analysisError);
         cachedFramesRef.current = null;
+        cacheSignatureRef.current = null;
         setAnalysisStatus('error');
         setAnalysisProgress(0);
         setAnalysisEtaSec(null);
@@ -400,7 +424,7 @@ export function usePoseLandmarks({
             setAnalysisStatus('ready');
             setAnalysisProgress(1);
             setAnalysisEtaSec(0);
-          } else if (modelVariant.startsWith('yolo')) {
+          } else if (supportsCachedPreprocessing) {
             setStatus('error');
             setError('Pose cache not found. Process this clip from the Library first.');
             setPoses([]);
@@ -540,6 +564,7 @@ export function usePoseLandmarks({
     minPosePresenceConfidence,
     minTrackingConfidence,
     modelVariant,
+    preprocessPreset,
     trimEndSec,
     trimStartSec,
     targetFps,

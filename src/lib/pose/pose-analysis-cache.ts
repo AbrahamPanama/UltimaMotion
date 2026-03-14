@@ -1,5 +1,5 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
-import type { PoseModelVariant } from '@/types';
+import type { PoseModelVariant, PosePreprocessPresetId } from '@/types';
 import {
   getPoseAnalysis,
   getPoseAnalysisIdsByVideoId,
@@ -13,7 +13,9 @@ import {
 export interface PoseAnalysisCacheKey {
   videoId: string;
   modelVariant: PoseModelVariant;
+  preprocessPreset: PosePreprocessPresetId;
   targetFps: number;
+  inputSize: number;
   yoloMultiPerson: boolean;
   trimStartMs: number;
   trimEndMs: number;
@@ -29,7 +31,10 @@ export interface CachedPoseAnalysis {
   frames: CachedPoseFrame[];
   createdAtMs: number;
   modelVariant: string;
+  preprocessPreset: string;
   targetFps: number;
+  effectiveSampleFps: number;
+  inputSize: number;
   yoloMultiPerson: boolean;
   trimStartMs: number;
   trimEndMs: number;
@@ -39,7 +44,7 @@ const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
 export const buildPoseAnalysisCacheId = (key: PoseAnalysisCacheKey) =>
   [
-    'posecache-v2',
+    'posecache-v3',
     key.videoId,
     `s${key.trimStartMs}`,
     `e${key.trimEndMs}`,
@@ -74,7 +79,10 @@ export const loadPoseAnalysisCache = async (cacheId: string): Promise<CachedPose
     id: record.id,
     createdAtMs: record.createdAtMs,
     modelVariant: record.modelVariant,
+    preprocessPreset: record.preprocessPreset ?? 'accurate',
     targetFps: record.targetFps,
+    effectiveSampleFps: record.effectiveSampleFps ?? record.targetFps,
+    inputSize: record.inputSize ?? 640,
     yoloMultiPerson: record.yoloMultiPerson,
     trimStartMs: record.trimStartMs,
     trimEndMs: record.trimEndMs,
@@ -87,7 +95,8 @@ export const loadPoseAnalysisCache = async (cacheId: string): Promise<CachedPose
 
 export const savePoseAnalysisCache = async (
   key: PoseAnalysisCacheKey,
-  frames: CachedPoseFrame[]
+  frames: CachedPoseFrame[],
+  metadata?: { effectiveSampleFps?: number | null }
 ) => {
   const id = buildPoseAnalysisCacheId(key);
   const normalizedFrames = frames
@@ -98,7 +107,13 @@ export const savePoseAnalysisCache = async (
     id,
     videoId: key.videoId,
     modelVariant: key.modelVariant,
+    preprocessPreset: key.preprocessPreset,
     targetFps: Math.max(1, Math.round(key.targetFps)),
+    effectiveSampleFps: Math.max(
+      1,
+      Math.round(metadata?.effectiveSampleFps ?? key.targetFps)
+    ),
+    inputSize: Math.max(1, Math.round(key.inputSize)),
     yoloMultiPerson: key.yoloMultiPerson,
     trimStartMs: key.trimStartMs,
     trimEndMs: key.trimEndMs,
@@ -119,6 +134,23 @@ export const savePoseAnalysisCache = async (
 
   await putPoseAnalysis(record);
   return id;
+};
+
+export const doesPoseAnalysisMatchKey = (
+  analysis: CachedPoseAnalysis | null | undefined,
+  key: PoseAnalysisCacheKey
+) => {
+  if (!analysis) return false;
+  return (
+    analysis.modelVariant === key.modelVariant &&
+    analysis.preprocessPreset === key.preprocessPreset &&
+    Math.round(analysis.targetFps) === Math.round(key.targetFps) &&
+    Math.round(analysis.inputSize) === Math.round(key.inputSize) &&
+    analysis.yoloMultiPerson === key.yoloMultiPerson &&
+    analysis.trimStartMs === key.trimStartMs &&
+    analysis.trimEndMs === key.trimEndMs &&
+    analysis.frames.length > 0
+  );
 };
 
 export const findClosestPoseFrame = (

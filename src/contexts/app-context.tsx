@@ -1,15 +1,27 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
-import type { Video, Drawing, DrawingType, PoseModelVariant, PoseAnalyzeScope } from '@/types';
+import type {
+  Video,
+  Drawing,
+  DrawingType,
+  PoseAngleMetricId,
+  PoseAngleSelectionMap,
+  PoseModelVariant,
+  PoseAnalyzeScope,
+  PosePreprocessPresetId,
+} from '@/types';
 import { initDB, getAllVideos, addVideo as addVideoDB, deleteVideo as deleteVideoDB, toggleVideoFavorite as toggleFavDB } from '@/lib/db';
 import {
   buildPoseAnalysisCacheId,
+  doesPoseAnalysisMatchKey,
   loadPoseAnalysisCache,
   type PoseAnalysisCacheKey,
 } from '@/lib/pose/pose-analysis-cache';
 import { preprocessPoseVideoClip } from '@/lib/pose/pose-preprocess-job';
 import type { PoseRuntimeConfig } from '@/lib/pose/pose-runtime';
+import { createPoseAngleSelectionMap } from '@/lib/pose/pose-angle-metrics';
+import { getPosePreprocessPreset } from '@/lib/pose/pose-preprocess-preset';
 import { useToast } from "@/hooks/use-toast";
 
 const MAX_SLOTS = 4;
@@ -68,6 +80,7 @@ export interface PoseProcessingState {
   etaSec: number | null;
   error: string | null;
   modelVariant: PoseModelVariant | null;
+  preprocessPreset: PosePreprocessPresetId | null;
   updatedAtMs: number;
 }
 
@@ -77,6 +90,7 @@ const createIdlePoseProcessingState = (): PoseProcessingState => ({
   etaSec: null,
   error: null,
   modelVariant: null,
+  preprocessPreset: null,
   updatedAtMs: Date.now(),
 });
 
@@ -88,7 +102,11 @@ interface AppContextType {
   toggleFavorite: (id: string) => Promise<void>;
   poseProcessingByVideo: Record<string, PoseProcessingState>;
   getPoseProcessingState: (videoId?: string | null) => PoseProcessingState;
-  processPoseForVideo: (video: Video, modelVariant?: PoseModelVariant) => Promise<boolean>;
+  processPoseForVideo: (
+    video: Video,
+    modelVariant?: PoseModelVariant,
+    preprocessPreset?: PosePreprocessPresetId
+  ) => Promise<boolean>;
   cancelPoseProcessing: (videoId?: string | null) => void;
   cancelAllPoseProcessing: () => void;
 
@@ -156,6 +174,8 @@ interface AppContextType {
   setPoseModelVariant: (variant: PoseModelVariant) => void;
   poseAnalyzeScope: PoseAnalyzeScope;
   setPoseAnalyzeScope: (scope: PoseAnalyzeScope) => void;
+  posePreprocessPreset: PosePreprocessPresetId;
+  setPosePreprocessPreset: (preset: PosePreprocessPresetId) => void;
   poseMinVisibility: number;
   setPoseMinVisibility: (value: number) => void;
   poseTargetFps: number;
@@ -178,14 +198,18 @@ interface AppContextType {
   setPoseShowCoG: (value: boolean) => void;
   poseShowCoGCharts: boolean;
   setPoseShowCoGCharts: (value: boolean) => void;
-  poseShowJointAngles: boolean;
-  setPoseShowJointAngles: (value: boolean) => void;
+  poseVisibleAngles: PoseAngleSelectionMap;
+  setPoseAngleVisible: (id: PoseAngleMetricId, value: boolean) => void;
+  posePlottedAngles: PoseAngleSelectionMap;
+  setPoseAnglePlotted: (id: PoseAngleMetricId, value: boolean) => void;
   poseShowBodyLean: boolean;
   setPoseShowBodyLean: (value: boolean) => void;
   poseShowJumpHeight: boolean;
   setPoseShowJumpHeight: (value: boolean) => void;
   poseLabelScale: number;
   setPoseLabelScale: (value: number) => void;
+  poseBackgroundBlackout: number;
+  setPoseBackgroundBlackout: (value: number) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -231,6 +255,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [isPoseEnabled, setIsPoseEnabled] = useState<boolean>(false);
   const [poseModelVariant, setPoseModelVariant] = useState<PoseModelVariant>('yolo26-xlarge');
   const [poseAnalyzeScope, setPoseAnalyzeScope] = useState<PoseAnalyzeScope>('all-visible');
+  const [posePreprocessPreset, setPosePreprocessPreset] = useState<PosePreprocessPresetId>('accurate');
   const [poseMinVisibility, setPoseMinVisibility] = useState<number>(0.25);
   const [poseTargetFps, setPoseTargetFps] = useState<number>(60);
   const [poseMinPoseDetectionConfidence, setPoseMinPoseDetectionConfidence] = useState<number>(0.55);
@@ -242,10 +267,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [poseUseYoloMultiPerson, setPoseUseYoloMultiPerson] = useState<boolean>(true);
   const [poseShowCoG, setPoseShowCoG] = useState<boolean>(false);
   const [poseShowCoGCharts, setPoseShowCoGCharts] = useState<boolean>(true);
-  const [poseShowJointAngles, setPoseShowJointAngles] = useState<boolean>(false);
+  const [poseVisibleAngles, setPoseVisibleAngles] = useState<PoseAngleSelectionMap>(() => createPoseAngleSelectionMap(true));
+  const [posePlottedAngles, setPosePlottedAngles] = useState<PoseAngleSelectionMap>(() => createPoseAngleSelectionMap(false));
   const [poseShowBodyLean, setPoseShowBodyLean] = useState<boolean>(false);
   const [poseShowJumpHeight, setPoseShowJumpHeight] = useState<boolean>(false);
   const [poseLabelScale, setPoseLabelScale] = useState<number>(1);
+  const [poseBackgroundBlackout, setPoseBackgroundBlackout] = useState<number>(0);
   const hadAnyGridVideoRef = useRef(false);
 
   const resetTransientGridControls = useCallback(() => {
@@ -497,7 +524,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const clampFps = (value: number) => Math.max(5, Math.min(60, Math.round(value)));
   const clampPoseLabelScale = (value: number) => {
     if (!Number.isFinite(value)) return 1;
-    return Math.max(0.7, Math.min(2, value));
+    return Math.max(0.7, Math.min(3, value));
   };
 
   const handleSetPoseMinVisibility = (value: number) => {
@@ -523,6 +550,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const handleSetPoseLabelScale = (value: number) => {
     setPoseLabelScale(clampPoseLabelScale(value));
   };
+
+  const handleSetPoseBackgroundBlackout = (value: number) => {
+    setPoseBackgroundBlackout(clampUnit(value));
+  };
+
+  const handleSetPoseAngleVisible = useCallback((id: PoseAngleMetricId, value: boolean) => {
+    setPoseVisibleAngles((prev) => (prev[id] === value ? prev : { ...prev, [id]: value }));
+  }, []);
+
+  const handleSetPoseAnglePlotted = useCallback((id: PoseAngleMetricId, value: boolean) => {
+    setPosePlottedAngles((prev) => (prev[id] === value ? prev : { ...prev, [id]: value }));
+  }, []);
 
   const updateSyncOffset = useCallback((index: number, delta: number) => {
     setSyncOffsets(prev => {
@@ -590,22 +629,29 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     hadAnyGridVideoRef.current = hasAnyGridVideo;
   }, [resetTransientGridControls, slots]);
 
-  const buildPoseCacheKeyForVideo = useCallback((video: Video, modelVariant?: PoseModelVariant): PoseAnalysisCacheKey => {
+  const buildPoseCacheKeyForVideo = useCallback((
+    video: Video,
+    modelVariant?: PoseModelVariant,
+    preprocessPresetId?: PosePreprocessPresetId
+  ): PoseAnalysisCacheKey => {
     const trimStartSec = Number.isFinite(video.trimStart) ? Math.max(0, video.trimStart ?? 0) : 0;
     const trimEndCandidate = Number.isFinite(video.trimEnd) ? video.trimEnd ?? trimStartSec : video.duration;
     const trimEndSec = Math.max(
       trimStartSec,
       Number.isFinite(trimEndCandidate) ? trimEndCandidate : trimStartSec
     );
+    const preset = getPosePreprocessPreset(preprocessPresetId ?? posePreprocessPreset);
     return {
       videoId: video.id,
       modelVariant: modelVariant ?? poseModelVariant,
-      targetFps: poseTargetFps,
+      preprocessPreset: preset.id,
+      targetFps: preset.targetFps,
+      inputSize: preset.inputSize,
       yoloMultiPerson: poseUseYoloMultiPerson,
       trimStartMs: Math.max(0, Math.floor(trimStartSec * 1000)),
       trimEndMs: Math.max(0, Math.floor(trimEndSec * 1000)),
     };
-  }, [poseModelVariant, poseTargetFps, poseUseYoloMultiPerson]);
+  }, [poseModelVariant, posePreprocessPreset, poseUseYoloMultiPerson]);
 
   const enqueuePoseProcessingJob = useCallback(function <T>(job: () => Promise<T>): Promise<T> {
     const queuedJob = poseProcessingQueueRef.current.then(job, job);
@@ -640,17 +686,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseProcessingByVideo(prev => {
       const current = prev[videoId];
       if (!current || (current.status !== 'processing' && current.status !== 'queued')) return prev;
-      return {
-        ...prev,
-        [videoId]: {
-          ...current,
-          status: 'idle',
-          progress: 0,
-          etaSec: null,
-          error: null,
-          updatedAtMs: Date.now(),
-        },
-      };
+        return {
+          ...prev,
+          [videoId]: {
+            ...current,
+            status: 'idle',
+            progress: 0,
+            etaSec: null,
+            error: null,
+            preprocessPreset: null,
+            updatedAtMs: Date.now(),
+          },
+        };
     });
   }, []);
 
@@ -668,6 +715,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           progress: 0,
           etaSec: null,
           error: null,
+          preprocessPreset: null,
           updatedAtMs: Date.now(),
         };
       }
@@ -683,10 +731,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     [poseProcessingByVideo]
   );
 
-  const processPoseForVideo = useCallback(async (video: Video, modelVariant?: PoseModelVariant) => {
+  const processPoseForVideo = useCallback(async (
+    video: Video,
+    modelVariant?: PoseModelVariant,
+    preprocessPresetId?: PosePreprocessPresetId
+  ) => {
     if (!video?.id) return false;
     removedVideoIdsRef.current.delete(video.id);
     const modelToProcess = modelVariant ?? poseModelVariant;
+    const presetToProcess = preprocessPresetId ?? posePreprocessPreset;
 
     const existingPromise = poseProcessingPromisesRef.current[video.id];
     if (existingPromise) {
@@ -696,12 +749,16 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     const abortController = new AbortController();
     poseProcessingControllersRef.current[video.id] = abortController;
 
-    const buildReadyState = (variant: PoseModelVariant | null): PoseProcessingState => ({
+    const buildReadyState = (
+      variant: PoseModelVariant | null,
+      preset: PosePreprocessPresetId | null
+    ): PoseProcessingState => ({
       status: 'ready',
       progress: 1,
       etaSec: 0,
       error: null,
       modelVariant: variant,
+      preprocessPreset: preset,
       updatedAtMs: Date.now(),
     });
     const buildProcessingState = (progress: number, etaSec: number | null): PoseProcessingState => ({
@@ -710,6 +767,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       etaSec,
       error: null,
       modelVariant: modelToProcess,
+      preprocessPreset: presetToProcess,
       updatedAtMs: Date.now(),
     });
     const buildIdleState = (): PoseProcessingState => ({
@@ -718,6 +776,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       etaSec: null,
       error: null,
       modelVariant: null,
+      preprocessPreset: null,
       updatedAtMs: Date.now(),
     });
     const buildQueuedState = (): PoseProcessingState => ({
@@ -726,14 +785,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       etaSec: null,
       error: null,
       modelVariant: modelToProcess,
+      preprocessPreset: presetToProcess,
       updatedAtMs: Date.now(),
     });
     const restorePoseStateAfterAbort = async (): Promise<PoseProcessingState> => {
-      const cacheKey = buildPoseCacheKeyForVideo(video, modelToProcess);
+      const cacheKey = buildPoseCacheKeyForVideo(video, modelToProcess, presetToProcess);
       const cacheId = buildPoseAnalysisCacheId(cacheKey);
       const cached = await loadPoseAnalysisCache(cacheId);
-      if (cached && cached.frames.length > 0) {
-        return buildReadyState((cached.modelVariant ?? modelToProcess) as PoseModelVariant);
+      if (doesPoseAnalysisMatchKey(cached, cacheKey)) {
+        return buildReadyState(
+          (cached?.modelVariant ?? modelToProcess) as PoseModelVariant,
+          (cached?.preprocessPreset ?? presetToProcess) as PosePreprocessPresetId
+        );
       }
       return buildIdleState();
     };
@@ -741,7 +804,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseProcessingStateForVideo(video.id, buildQueuedState());
 
     const processPromise = enqueuePoseProcessingJob(async () => {
-      const cacheKey = buildPoseCacheKeyForVideo(video, modelToProcess);
+      const cacheKey = buildPoseCacheKeyForVideo(video, modelToProcess, presetToProcess);
       const cacheId = buildPoseAnalysisCacheId(cacheKey);
 
       if (abortController.signal.aborted) {
@@ -754,12 +817,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
       try {
         const cached = await loadPoseAnalysisCache(cacheId);
-        if (
-          cached &&
-          cached.frames.length > 0 &&
-          cached.modelVariant === modelToProcess
-        ) {
-          setPoseProcessingStateForVideo(video.id, buildReadyState(modelToProcess));
+        if (doesPoseAnalysisMatchKey(cached, cacheKey)) {
+          setPoseProcessingStateForVideo(video.id, buildReadyState(modelToProcess, presetToProcess));
           return true;
         }
 
@@ -767,6 +826,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           modelVariant: modelToProcess,
           numPoses: 4,
           yoloMultiPerson: poseUseYoloMultiPerson,
+          preprocessInputSize: cacheKey.inputSize,
           minPoseDetectionConfidence: poseMinPoseDetectionConfidence,
           minPosePresenceConfidence: poseMinPosePresenceConfidence,
           minTrackingConfidence: poseMinTrackingConfidence,
@@ -776,7 +836,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           video,
           cacheKey,
           runtimeConfig,
-          targetFps: poseTargetFps,
+          preprocessPreset: presetToProcess,
+          targetFps: cacheKey.targetFps,
           signal: abortController.signal,
           onProgress: (progress, etaSec) => {
             if (abortController.signal.aborted) return;
@@ -790,7 +851,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           return false;
         }
 
-        setPoseProcessingStateForVideo(video.id, buildReadyState(modelToProcess));
+        setPoseProcessingStateForVideo(video.id, buildReadyState(modelToProcess, presetToProcess));
         return true;
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {
@@ -805,6 +866,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           etaSec: null,
           error: message,
           modelVariant: modelToProcess,
+          preprocessPreset: presetToProcess,
           updatedAtMs: Date.now(),
         });
         return false;
@@ -825,7 +887,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     poseMinPosePresenceConfidence,
     poseMinTrackingConfidence,
     poseModelVariant,
-    poseTargetFps,
+    posePreprocessPreset,
     poseUseYoloMultiPerson,
     setPoseProcessingStateForVideo,
   ]);
@@ -856,6 +918,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
           videoId: video.id,
           ready: Boolean(cached && cached.frames.length > 0),
           modelVariant: (cached?.modelVariant ?? null) as PoseModelVariant | null,
+          preprocessPreset: (cached?.preprocessPreset ?? null) as PosePreprocessPresetId | null,
         };
       }));
 
@@ -865,7 +928,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
       setPoseProcessingByVideo(prev => {
         const next: Record<string, PoseProcessingState> = {};
-        for (const { videoId, ready, modelVariant } of existingReady) {
+        for (const { videoId, ready, modelVariant, preprocessPreset } of existingReady) {
           const previous = prev[videoId];
           if (previous?.status === 'processing' || previous?.status === 'queued') {
             next[videoId] = previous;
@@ -878,6 +941,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
               etaSec: 0,
               error: null,
               modelVariant,
+              preprocessPreset,
               updatedAtMs: Date.now(),
             };
             continue;
@@ -972,6 +1036,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseModelVariant,
     poseAnalyzeScope,
     setPoseAnalyzeScope,
+    posePreprocessPreset,
+    setPosePreprocessPreset,
     poseMinVisibility,
     setPoseMinVisibility: handleSetPoseMinVisibility,
     poseTargetFps,
@@ -994,14 +1060,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setPoseShowCoG,
     poseShowCoGCharts,
     setPoseShowCoGCharts,
-    poseShowJointAngles,
-    setPoseShowJointAngles,
+    poseVisibleAngles,
+    setPoseAngleVisible: handleSetPoseAngleVisible,
+    posePlottedAngles,
+    setPoseAnglePlotted: handleSetPoseAnglePlotted,
     poseShowBodyLean,
     setPoseShowBodyLean,
     poseShowJumpHeight,
     setPoseShowJumpHeight,
     poseLabelScale,
     setPoseLabelScale: handleSetPoseLabelScale,
+    poseBackgroundBlackout,
+    setPoseBackgroundBlackout: handleSetPoseBackgroundBlackout,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

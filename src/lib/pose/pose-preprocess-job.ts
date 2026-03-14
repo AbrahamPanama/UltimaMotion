@@ -1,22 +1,29 @@
 import type { Video } from '@/types';
+import type { PosePreprocessPresetId } from '@/types';
 import type { PoseRuntimeConfig } from '@/lib/pose/pose-runtime';
-import { createPoseRuntime } from '@/lib/pose/pose-runtime';
+import { createPoseRuntime, type PoseRuntime } from '@/lib/pose/pose-runtime';
 import {
   savePoseAnalysisCache,
   type CachedPoseFrame,
   type PoseAnalysisCacheKey,
 } from '@/lib/pose/pose-analysis-cache';
+import { getPosePreprocessPreset } from '@/lib/pose/pose-preprocess-preset';
 
 interface PosePreprocessJobOptions {
   video: Video;
   cacheKey: PoseAnalysisCacheKey;
   runtimeConfig: PoseRuntimeConfig;
+  preprocessPreset: PosePreprocessPresetId;
   targetFps: number;
   signal?: AbortSignal;
   onProgress?: (progress: number, etaSec: number | null) => void;
 }
 
 const SEEK_TIMEOUT_MS = 400;
+const PROGRESS_UPDATE_INTERVAL_MS = 180;
+const SHARED_RUNTIME_IDLE_MS = 30000;
+const FPS_PROBE_MAX_SAMPLES = 8;
+const FPS_PROBE_TIMEOUT_MS = 450;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
@@ -85,6 +92,32 @@ type VideoWithFrameCallback = HTMLVideoElement & {
   cancelVideoFrameCallback?: (handle: number) => void;
 };
 
+let sharedPreprocessRuntime: PoseRuntime | null = null;
+let sharedPreprocessRuntimeIdleHandle: number | null = null;
+
+const acquireSharedPreprocessRuntime = () => {
+  if (sharedPreprocessRuntimeIdleHandle !== null) {
+    window.clearTimeout(sharedPreprocessRuntimeIdleHandle);
+    sharedPreprocessRuntimeIdleHandle = null;
+  }
+  if (!sharedPreprocessRuntime) {
+    sharedPreprocessRuntime = createPoseRuntime();
+  }
+  return sharedPreprocessRuntime;
+};
+
+const releaseSharedPreprocessRuntime = () => {
+  if (!sharedPreprocessRuntime) return;
+  if (sharedPreprocessRuntimeIdleHandle !== null) {
+    window.clearTimeout(sharedPreprocessRuntimeIdleHandle);
+  }
+  sharedPreprocessRuntimeIdleHandle = window.setTimeout(() => {
+    sharedPreprocessRuntime?.close();
+    sharedPreprocessRuntime = null;
+    sharedPreprocessRuntimeIdleHandle = null;
+  }, SHARED_RUNTIME_IDLE_MS);
+};
+
 const waitForDecodedFrame = (videoElement: HTMLVideoElement, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
@@ -141,6 +174,94 @@ const waitForDecodedFrame = (videoElement: HTMLVideoElement, signal?: AbortSigna
     signal?.addEventListener('abort', onAbort, { once: true });
     requestAnimationFrame(() => finish());
   });
+
+const detectSourceFrameRate = async (
+  videoElement: HTMLVideoElement,
+  trimStartSec: number,
+  signal?: AbortSignal
+) => {
+  const videoWithCallback = videoElement as VideoWithFrameCallback;
+  if (!videoWithCallback.requestVideoFrameCallback) {
+    return null;
+  }
+
+  await seekVideo(videoElement, trimStartSec, signal);
+  await waitForDecodedFrame(videoElement, signal);
+  throwIfAborted(signal);
+
+  return new Promise<number | null>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
+
+    const deltas: number[] = [];
+    let lastMediaTime: number | null = null;
+    let settled = false;
+    let handle: number | null = null;
+    let timeoutHandle: number | null = null;
+
+    const cleanup = () => {
+      signal?.removeEventListener('abort', onAbort);
+      if (handle !== null && videoWithCallback.cancelVideoFrameCallback) {
+        videoWithCallback.cancelVideoFrameCallback(handle);
+      }
+      if (timeoutHandle !== null) {
+        window.clearTimeout(timeoutHandle);
+      }
+      videoElement.pause();
+    };
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (deltas.length === 0) {
+        resolve(null);
+        return;
+      }
+      const sorted = [...deltas].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      if (!Number.isFinite(median) || median <= 0) {
+        resolve(null);
+        return;
+      }
+      resolve(Math.max(1, Math.round(1 / median)));
+    };
+
+    const failAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(createAbortError());
+    };
+
+    const onAbort = () => failAbort();
+    const onFrame: VideoFrameCallback = (_now, metadata) => {
+      if (lastMediaTime !== null) {
+        const delta = metadata.mediaTime - lastMediaTime;
+        if (Number.isFinite(delta) && delta > 0 && delta < 1) {
+          deltas.push(delta);
+        }
+      }
+      lastMediaTime = metadata.mediaTime;
+      if (deltas.length >= FPS_PROBE_MAX_SAMPLES) {
+        finish();
+        return;
+      }
+      handle = videoWithCallback.requestVideoFrameCallback!(onFrame);
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+    timeoutHandle = window.setTimeout(finish, FPS_PROBE_TIMEOUT_MS);
+
+    videoElement.play().then(() => {
+      handle = videoWithCallback.requestVideoFrameCallback!(onFrame);
+    }).catch(() => {
+      finish();
+    });
+  });
+};
 
 const waitForCanPlay = (videoElement: HTMLVideoElement, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -209,14 +330,16 @@ export async function preprocessPoseVideoClip({
   video,
   cacheKey,
   runtimeConfig,
+  preprocessPreset,
   targetFps,
   signal,
   onProgress,
 }: PosePreprocessJobOptions): Promise<{ frameCount: number }> {
-  const runtime = createPoseRuntime();
+  const runtime = acquireSharedPreprocessRuntime();
   const videoElement = document.createElement('video');
   const objectUrl = URL.createObjectURL(video.blob);
   const startedAt = performance.now();
+  const preset = getPosePreprocessPreset(preprocessPreset);
 
   videoElement.preload = 'auto';
   videoElement.muted = true;
@@ -248,13 +371,37 @@ export async function preprocessPoseVideoClip({
       Number.isFinite(videoElement.duration) ? videoElement.duration : video.duration
     );
 
-    const stepMs = Math.max(1, Math.round(1000 / Math.max(1, targetFps)));
+    let detectedSourceFps: number | null = null;
+    try {
+      detectedSourceFps = await detectSourceFrameRate(videoElement, trimStartSec, signal);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
+      detectedSourceFps = null;
+    }
+    await seekVideo(videoElement, trimStartSec, signal);
+    await waitForDecodedFrame(videoElement, signal);
+    throwIfAborted(signal);
+
+    const effectiveTargetFps = Math.max(
+      1,
+      Math.min(
+        Math.round(targetFps),
+        detectedSourceFps && Number.isFinite(detectedSourceFps)
+          ? Math.max(1, Math.round(detectedSourceFps))
+          : Math.round(targetFps)
+      )
+    );
+    const stepMs = Math.max(1, Math.round(1000 / effectiveTargetFps));
     const totalSteps = Math.max(1, Math.floor((trimEndMs - trimStartMs) / stepMs) + 1);
 
     const frames: CachedPoseFrame[] = [];
     let previousMediaMs = -1;
     let analysisTimestampMs = 0;
     let processedSteps = 0;
+    let lastProgressEmitMs = 0;
+    let lastProgressRatio = -1;
 
     for (let mediaMs = trimStartMs; mediaMs <= trimEndMs; mediaMs += stepMs) {
       throwIfAborted(signal);
@@ -263,11 +410,33 @@ export async function preprocessPoseVideoClip({
       throwIfAborted(signal);
 
       const currentMediaMs = Math.max(trimStartMs, Math.floor(videoElement.currentTime * 1000));
+      processedSteps += 1;
+
+      if (currentMediaMs === previousMediaMs) {
+        const progress = clamp01(processedSteps / totalSteps);
+        const elapsedMs = performance.now() - startedAt;
+        if (
+          progress === 1 ||
+          progress - lastProgressRatio >= 0.01 ||
+          elapsedMs - lastProgressEmitMs >= PROGRESS_UPDATE_INTERVAL_MS
+        ) {
+          const elapsedSec = Math.max(0.001, elapsedMs / 1000);
+          const etaSec = Math.max(0, (elapsedSec / processedSteps) * (totalSteps - processedSteps));
+          onProgress?.(progress, etaSec);
+          lastProgressEmitMs = elapsedMs;
+          lastProgressRatio = progress;
+        }
+        continue;
+      }
+
       const dtMs = previousMediaMs >= 0 ? Math.max(1, currentMediaMs - previousMediaMs) : Math.max(1, stepMs);
       analysisTimestampMs += dtMs;
       previousMediaMs = currentMediaMs;
 
-      const result = await runtime.detectForVideo(videoElement, analysisTimestampMs, runtimeConfig);
+      const result = await runtime.detectForVideo(videoElement, analysisTimestampMs, {
+        ...runtimeConfig,
+        preprocessInputSize: preset.inputSize,
+      });
       throwIfAborted(signal);
       const detectedPoses = result?.landmarks ?? [];
       const previousFrame = frames[frames.length - 1];
@@ -280,20 +449,26 @@ export async function preprocessPoseVideoClip({
         });
       }
 
-      processedSteps += 1;
       const progress = clamp01(processedSteps / totalSteps);
-      const elapsedSec = Math.max(0.001, (performance.now() - startedAt) / 1000);
-      const etaSec = processedSteps > 0
-        ? Math.max(0, (elapsedSec / processedSteps) * (totalSteps - processedSteps))
-        : null;
-      onProgress?.(progress, etaSec);
+      const elapsedMs = performance.now() - startedAt;
+      if (
+        progress === 1 ||
+        progress - lastProgressRatio >= 0.01 ||
+        elapsedMs - lastProgressEmitMs >= PROGRESS_UPDATE_INTERVAL_MS
+      ) {
+        const elapsedSec = Math.max(0.001, elapsedMs / 1000);
+        const etaSec = Math.max(0, (elapsedSec / processedSteps) * (totalSteps - processedSteps));
+        onProgress?.(progress, etaSec);
+        lastProgressEmitMs = elapsedMs;
+        lastProgressRatio = progress;
+      }
     }
 
     if (frames.length === 0) {
       throw new Error('Pose preprocessing produced no frames.');
     }
 
-    await savePoseAnalysisCache(cacheKey, frames);
+    await savePoseAnalysisCache(cacheKey, frames, { effectiveSampleFps: effectiveTargetFps });
 
     // Ensure we end in-range for predictable downstream behavior if caller reuses this element.
     await seekVideo(videoElement, trimStartSec, signal);
@@ -304,7 +479,7 @@ export async function preprocessPoseVideoClip({
     }
     throw new Error(formatError(error));
   } finally {
-    runtime.close();
+    releaseSharedPreprocessRuntime();
     videoElement.pause();
     videoElement.removeAttribute('src');
     videoElement.load();

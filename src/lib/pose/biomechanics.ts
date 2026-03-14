@@ -5,6 +5,8 @@
  * MediaPipe landmark indices: https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker#pose_landmarker_model
  */
 
+import type { PoseAngleMetricId } from '@/types';
+
 // ── Types ──
 
 export interface Point2D {
@@ -19,6 +21,8 @@ export interface CenterOfGravity {
 }
 
 export interface JointAngle {
+    /** Stable metric id */
+    id: PoseAngleMetricId;
     /** MediaPipe landmark index of the joint vertex */
     jointIndex: number;
     /** Label for display */
@@ -213,18 +217,19 @@ export const computeJointAngles = (pose: Point2D[]): JointAngle[] => {
     if (pose.length < 29) return [];
 
     const definitions: Array<{
+        id: PoseAngleMetricId;
         label: string;
         jointIndex: number;
         a: number; // first ray
         b: number; // vertex
         c: number; // second ray
     }> = [
-            { label: 'L Knee', jointIndex: L_KNEE, a: L_HIP, b: L_KNEE, c: L_ANKLE },
-            { label: 'R Knee', jointIndex: R_KNEE, a: R_HIP, b: R_KNEE, c: R_ANKLE },
-            { label: 'L Hip', jointIndex: L_HIP, a: L_SHOULDER, b: L_HIP, c: L_KNEE },
-            { label: 'R Hip', jointIndex: R_HIP, a: R_SHOULDER, b: R_HIP, c: R_KNEE },
-            { label: 'L Elbow', jointIndex: L_ELBOW, a: L_SHOULDER, b: L_ELBOW, c: L_WRIST },
-            { label: 'R Elbow', jointIndex: R_ELBOW, a: R_SHOULDER, b: R_ELBOW, c: R_WRIST },
+            { id: 'left-knee', label: 'L Knee', jointIndex: L_KNEE, a: L_HIP, b: L_KNEE, c: L_ANKLE },
+            { id: 'right-knee', label: 'R Knee', jointIndex: R_KNEE, a: R_HIP, b: R_KNEE, c: R_ANKLE },
+            { id: 'left-hip', label: 'L Hip', jointIndex: L_HIP, a: L_SHOULDER, b: L_HIP, c: L_KNEE },
+            { id: 'right-hip', label: 'R Hip', jointIndex: R_HIP, a: R_SHOULDER, b: R_HIP, c: R_KNEE },
+            { id: 'left-elbow', label: 'L Elbow', jointIndex: L_ELBOW, a: L_SHOULDER, b: L_ELBOW, c: L_WRIST },
+            { id: 'right-elbow', label: 'R Elbow', jointIndex: R_ELBOW, a: R_SHOULDER, b: R_ELBOW, c: R_WRIST },
         ];
 
     const results: JointAngle[] = [];
@@ -239,6 +244,7 @@ export const computeJointAngles = (pose: Point2D[]): JointAngle[] => {
         const { degrees, startAngle, sweepAngle } = angleBetween(pointA, vertex, pointB);
 
         results.push({
+            id: def.id,
             jointIndex: def.jointIndex,
             label: def.label,
             degrees,

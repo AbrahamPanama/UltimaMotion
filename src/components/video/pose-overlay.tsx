@@ -2,9 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
-import type { PoseModelVariant } from '@/types';
+import type {
+  PoseAngleMetricId,
+  PoseAngleSelectionMap,
+  PoseModelVariant,
+  PosePreprocessPresetId,
+} from '@/types';
 import { cn } from '@/lib/utils';
 import { usePoseLandmarks } from '@/hooks/use-pose-landmarks';
+import { POSE_ANGLE_METRICS } from '@/lib/pose/pose-angle-metrics';
 import {
   computeCoG,
   computeJointAngles,
@@ -50,6 +56,14 @@ const LEFT_ARM_LANDMARKS = new Set([11, 13, 15, 17, 19, 21]);
 const RIGHT_ARM_LANDMARKS = new Set([12, 14, 16, 18, 20, 22]);
 const LEFT_LEG_LANDMARKS = new Set([23, 25, 27, 29, 31]);
 const RIGHT_LEG_LANDMARKS = new Set([24, 26, 28, 30, 32]);
+const ANGLE_LIMB_MAP: Record<PoseAngleMetricId, LimbKey> = {
+  'left-knee': 'leftLeg',
+  'right-knee': 'rightLeg',
+  'left-hip': 'leftLeg',
+  'right-hip': 'rightLeg',
+  'left-elbow': 'leftArm',
+  'right-elbow': 'rightArm',
+};
 
 const connectionKey = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 
@@ -249,6 +263,7 @@ interface PoseOverlayProps {
   position: { x: number; y: number };
   objectFit: 'contain' | 'cover';
   modelVariant: PoseModelVariant;
+  preprocessPreset: PosePreprocessPresetId;
   videoId: string | null;
   trimStartSec: number;
   trimEndSec: number | null;
@@ -259,7 +274,8 @@ interface PoseOverlayProps {
   minVisibility: number;
   showCoG: boolean;
   showCoGCharts: boolean;
-  showJointAngles: boolean;
+  visibleAngles: PoseAngleSelectionMap;
+  plottedAngles: PoseAngleSelectionMap;
   showBodyLean: boolean;
   showJumpHeight: boolean;
   labelScale: number;
@@ -392,6 +408,21 @@ interface LeanSample {
   leanDeg: number;
 }
 
+type AngleValueMap = Record<PoseAngleMetricId, number | null>;
+
+interface AngleSample {
+  tMs: number;
+  values: AngleValueMap;
+}
+
+interface AngleSeriesPath {
+  id: PoseAngleMetricId;
+  label: string;
+  color: string;
+  d: string;
+  latest: number | null;
+}
+
 interface LeanSeriesPath {
   d: string;
   latest: number;
@@ -403,6 +434,22 @@ interface LeanSeriesPath {
 const BODY_LEAN_CHART_WINDOW_MS = 8000;
 const BODY_LEAN_CHART_WIDTH = 260;
 const BODY_LEAN_CHART_HEIGHT = 86;
+const ANGLE_CHART_WINDOW_MS = 8000;
+const ANGLE_CHART_WIDTH = 260;
+const ANGLE_CHART_HEIGHT = 96;
+
+const createEmptyAngleValueMap = (): AngleValueMap =>
+  Object.fromEntries(POSE_ANGLE_METRICS.map((metric) => [metric.id, null])) as AngleValueMap;
+
+const areAngleValueMapsEqual = (a: AngleValueMap, b: AngleValueMap) =>
+  POSE_ANGLE_METRICS.every((metric) => {
+    const aValue = a[metric.id];
+    const bValue = b[metric.id];
+    if (aValue === null || bValue === null) {
+      return aValue === bValue;
+    }
+    return Math.abs(aValue - bValue) < 1e-4;
+  });
 
 const buildLeanSeriesPath = (
   samples: LeanSample[],
@@ -449,6 +496,54 @@ const buildLeanSeriesPath = (
   };
 };
 
+const buildAngleSeriesPaths = (
+  samples: AngleSample[],
+  plottedMetricIds: PoseAngleMetricId[],
+  width: number,
+  height: number
+): AngleSeriesPath[] | null => {
+  if (samples.length < 2 || plottedMetricIds.length === 0) return null;
+
+  const start = samples[0].tMs;
+  const end = samples[samples.length - 1].tMs;
+  const rangeT = Math.max(1, end - start);
+
+  return plottedMetricIds.map((metricId) => {
+    const metric = POSE_ANGLE_METRICS.find((item) => item.id === metricId);
+    const segments: string[] = [];
+    let currentSegment: string[] = [];
+
+    samples.forEach((sample) => {
+      const value = sample.values[metricId];
+      if (!Number.isFinite(value)) {
+        if (currentSegment.length > 0) {
+          segments.push(`M ${currentSegment.join(' L ')}`);
+          currentSegment = [];
+        }
+        return;
+      }
+
+      const tx = ((sample.tMs - start) / rangeT) * width;
+      const ty = height - (Math.max(0, Math.min(180, value as number)) / 180) * height;
+      currentSegment.push(`${tx.toFixed(2)},${ty.toFixed(2)}`);
+    });
+
+    if (currentSegment.length > 0) {
+      segments.push(`M ${currentSegment.join(' L ')}`);
+    }
+
+    const latestValue = samples[samples.length - 1]?.values[metricId] ?? null;
+
+    return {
+      id: metricId,
+      label: metric?.label ?? metricId,
+      color: metric?.chartColor ?? '#ffffff',
+      d: segments.join(' '),
+      latest: Number.isFinite(latestValue) ? latestValue : null,
+    };
+  });
+};
+
 export default function PoseOverlay({
   enabled,
   videoElement,
@@ -456,6 +551,7 @@ export default function PoseOverlay({
   position,
   objectFit,
   modelVariant,
+  preprocessPreset,
   videoId,
   trimStartSec,
   trimEndSec,
@@ -466,7 +562,8 @@ export default function PoseOverlay({
   minVisibility,
   showCoG,
   showCoGCharts,
-  showJointAngles,
+  visibleAngles,
+  plottedAngles,
   showBodyLean,
   showJumpHeight,
   labelScale,
@@ -477,7 +574,9 @@ export default function PoseOverlay({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const jumpHeightStateRef = useRef<JumpHeightState>(createJumpHeightState());
   const [leanSamples, setLeanSamples] = useState<LeanSample[]>([]);
+  const [angleSamples, setAngleSamples] = useState<AngleSample[]>([]);
   const lastLeanSampleRef = useRef<LeanSample | null>(null);
+  const lastAngleSampleRef = useRef<AngleSample | null>(null);
 
   const {
     status,
@@ -495,6 +594,7 @@ export default function PoseOverlay({
     enabled,
     videoElement,
     modelVariant,
+    preprocessPreset,
     videoId,
     trimStartSec,
     trimEndSec,
@@ -527,12 +627,13 @@ export default function PoseOverlay({
   const selectedPoseIndex = getAutoPoseIndex(projectedPoses);
   const selectedPose = selectedPoseIndex >= 0 ? projectedPoses[selectedPoseIndex] : null;
   const isYoloModel = modelVariant.startsWith('yolo');
+  const supportsCachedPreprocessing = isYoloModel || modelVariant === 'heavy';
   const analyzeEtaLabel = analysisEtaSec !== null
     ? `${Math.max(0, Math.ceil(analysisEtaSec))}s left`
     : null;
   const analysisModeLabel = analysisStatus === 'ready'
     ? 'cached'
-    : analysisStatus === 'error' && isYoloModel
+    : analysisStatus === 'error' && supportsCachedPreprocessing
       ? 'cache-miss'
       : analysisStatus === 'analyzing'
     ? `analyzing ${Math.round(analysisProgress * 100)}%${analyzeEtaLabel ? ` · ${analyzeEtaLabel}` : ''}`
@@ -558,6 +659,16 @@ export default function PoseOverlay({
       .filter((box): box is PoseBox => box !== null)
     : [];
   const drawPose = posesToRender.length > 0;
+  const visibleAngleIds = useMemo(
+    () => POSE_ANGLE_METRICS.filter((metric) => visibleAngles[metric.id]).map((metric) => metric.id),
+    [visibleAngles]
+  );
+  const plottedAngleIds = useMemo(
+    () => POSE_ANGLE_METRICS.filter((metric) => plottedAngles[metric.id]).map((metric) => metric.id),
+    [plottedAngles]
+  );
+  const hasVisibleAngles = visibleAngleIds.length > 0;
+  const hasPlottedAngles = plottedAngleIds.length > 0;
   const visibleLandmarkCount = selectedPose
     ? selectedPose.filter((point) => point.visibility >= minVisibility).length
     : 0;
@@ -569,7 +680,36 @@ export default function PoseOverlay({
     () => ((showCoG || showJumpHeight) && selectedPose ? computeCoG(selectedPose) : null),
     [selectedPose, showCoG, showJumpHeight]
   );
-  const jointAngles = showJointAngles && selectedPose ? computeJointAngles(selectedPose) : [];
+  const computedJointAngles = useMemo(
+    () => (selectedPose && (hasVisibleAngles || hasPlottedAngles) ? computeJointAngles(selectedPose) : []),
+    [hasPlottedAngles, hasVisibleAngles, selectedPose]
+  );
+  const jointAngleMap = useMemo(() => {
+    const mapped = Object.fromEntries(
+      POSE_ANGLE_METRICS.map((metric) => [metric.id, null])
+    ) as Record<PoseAngleMetricId, JointAngle | null>;
+
+    computedJointAngles.forEach((angle) => {
+      const visibilityGate = Math.min(angle.pointA.visibility, angle.vertex.visibility, angle.pointB.visibility);
+      mapped[angle.id] = visibilityGate >= minVisibility ? angle : null;
+    });
+
+    return mapped;
+  }, [computedJointAngles, minVisibility]);
+  const jointAngles = useMemo(
+    () =>
+      visibleAngleIds
+        .map((id) => jointAngleMap[id])
+        .filter((angle): angle is JointAngle => angle !== null),
+    [jointAngleMap, visibleAngleIds]
+  );
+  const currentAngleValues = useMemo(() => {
+    const values = createEmptyAngleValueMap();
+    POSE_ANGLE_METRICS.forEach((metric) => {
+      values[metric.id] = jointAngleMap[metric.id]?.degrees ?? null;
+    });
+    return values;
+  }, [jointAngleMap]);
   const bodyLean = useMemo(
     () => ((showBodyLean || showCoGCharts) && selectedPose ? computeBodyLean(selectedPose) : null),
     [selectedPose, showBodyLean, showCoGCharts]
@@ -579,13 +719,13 @@ export default function PoseOverlay({
     ? updateJumpHeight(jumpHeightStateRef.current, cog, sourceHeight, mediaTimeMs)
     : null;
 
-  const safeLabelScale = Number.isFinite(labelScale) ? Math.max(0.7, Math.min(2, labelScale)) : 1;
+  const safePoseLabelScale = Number.isFinite(labelScale) ? Math.max(0.7, Math.min(3, labelScale)) : 1;
   const arcRadius = Math.max(16, sourceWidth * 0.025);
-  const fontSize = Math.max(10, sourceWidth * 0.012 * safeLabelScale);
-  const chartTitleFontSize = Math.max(10, 10 * safeLabelScale);
-  const chartAxisFontSize = Math.max(10, 11 * safeLabelScale);
-  const chartValueFontSize = Math.max(9, 10 * safeLabelScale);
-  const hudFontSize = Math.max(10, 10 * safeLabelScale);
+  const poseLabelFontSize = Math.max(10, sourceWidth * 0.012 * safePoseLabelScale);
+  const chartTitleFontSize = 10;
+  const chartAxisFontSize = 11;
+  const chartValueFontSize = 10;
+  const hudFontSize = 10;
   const limbLegendItems: Array<{ label: string; limb: LimbKey }> = [
     { label: 'L Arm', limb: 'leftArm' },
     { label: 'R Arm', limb: 'rightArm' },
@@ -596,13 +736,26 @@ export default function PoseOverlay({
     () => buildLeanSeriesPath(leanSamples, BODY_LEAN_CHART_WIDTH, BODY_LEAN_CHART_HEIGHT),
     [leanSamples]
   );
+  const angleChartSeries = useMemo(
+    () => buildAngleSeriesPaths(angleSamples, plottedAngleIds, ANGLE_CHART_WIDTH, ANGLE_CHART_HEIGHT),
+    [angleSamples, plottedAngleIds]
+  );
 
   useEffect(() => {
     if (!enabled) {
       setLeanSamples([]);
+      setAngleSamples([]);
       lastLeanSampleRef.current = null;
+      lastAngleSampleRef.current = null;
     }
   }, [enabled]);
+
+  useEffect(() => {
+    if (!hasPlottedAngles) {
+      setAngleSamples([]);
+      lastAngleSampleRef.current = null;
+    }
+  }, [hasPlottedAngles]);
 
   useEffect(() => {
     if (!enabled || !showCoGCharts || bodyLeanAngleDeg === null) return;
@@ -646,6 +799,49 @@ export default function PoseOverlay({
     });
     lastLeanSampleRef.current = sample;
   }, [bodyLeanAngleDeg, enabled, mediaTimeMs, showCoGCharts]);
+
+  useEffect(() => {
+    if (!enabled || !hasPlottedAngles) return;
+    if (!Number.isFinite(mediaTimeMs)) return;
+
+    const sample: AngleSample = {
+      tMs: mediaTimeMs,
+      values: { ...currentAngleValues },
+    };
+
+    const lastSample = lastAngleSampleRef.current;
+    if (
+      lastSample &&
+      Math.abs(sample.tMs - lastSample.tMs) <= 1 &&
+      areAngleValueMapsEqual(sample.values, lastSample.values)
+    ) {
+      return;
+    }
+
+    setAngleSamples((prev) => {
+      if (prev.length === 0) return [sample];
+      const last = prev[prev.length - 1];
+      if (sample.tMs < last.tMs - 1) {
+        return [sample];
+      }
+      if (Math.abs(sample.tMs - last.tMs) <= 1) {
+        if (areAngleValueMapsEqual(sample.values, last.values)) {
+          return prev;
+        }
+        const next = [...prev];
+        next[next.length - 1] = sample;
+        return next;
+      }
+
+      const next = [...prev, sample];
+      const cutoff = sample.tMs - ANGLE_CHART_WINDOW_MS;
+      while (next.length > 2 && next[0].tMs < cutoff) {
+        next.shift();
+      }
+      return next;
+    });
+    lastAngleSampleRef.current = sample;
+  }, [currentAngleValues, enabled, hasPlottedAngles, mediaTimeMs]);
 
   if (!enabled) return null;
 
@@ -787,7 +983,7 @@ export default function PoseOverlay({
               x={cog.x + 12 / scale}
               y={cog.y - 4 / scale}
               fill="#fde68a"
-              fontSize={fontSize / scale}
+              fontSize={poseLabelFontSize / scale}
               fontWeight={700}
               style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.6)', strokeWidth: 2.5 / scale }}
             >
@@ -799,20 +995,12 @@ export default function PoseOverlay({
         {/* ── Joint Angles ── */}
         {jointAngles.map((angle) => {
           const labelPos = getAngleLabelPosition(angle, arcRadius / scale);
-          const angleLimb: LimbKey | null = angle.label === 'L Elbow'
-            ? 'leftArm'
-            : angle.label === 'R Elbow'
-              ? 'rightArm'
-              : angle.label === 'L Knee' || angle.label === 'L Hip'
-                ? 'leftLeg'
-                : angle.label === 'R Knee' || angle.label === 'R Hip'
-                  ? 'rightLeg'
-                  : null;
+          const angleLimb: LimbKey | null = ANGLE_LIMB_MAP[angle.id] ?? null;
           const angleColor = angleLimb && selectedStrain
             ? getLimbColor(angleLimb, selectedStrain[angleLimb])
             : 'rgba(255,255,255,0.85)';
           return (
-            <g key={angle.label}>
+            <g key={angle.id}>
               {/* Arc */}
               <path
                 d={describeArc(angle.vertex.x, angle.vertex.y, arcRadius / scale, angle.startAngle, angle.sweepAngle)}
@@ -827,7 +1015,7 @@ export default function PoseOverlay({
                 x={labelPos.x}
                 y={labelPos.y}
                 fill={angleColor}
-                fontSize={fontSize * 0.85 / scale}
+                fontSize={poseLabelFontSize * 0.85 / scale}
                 fontWeight={600}
                 textAnchor="middle"
                 dominantBaseline="central"
@@ -869,7 +1057,7 @@ export default function PoseOverlay({
               x={bodyLean.hipMid.x + 14 / scale}
               y={(bodyLean.hipMid.y + bodyLean.shoulderMid.y) / 2}
               fill="#22d3ee"
-              fontSize={fontSize / scale}
+              fontSize={poseLabelFontSize / scale}
               fontWeight={700}
               style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 2 / scale }}
             >
@@ -915,7 +1103,7 @@ export default function PoseOverlay({
               x={jumpHeight.cogPosition.x + 10 / scale}
               y={(jumpHeight.baselineY + jumpHeight.cogPosition.y) / 2}
               fill="#86efac"
-              fontSize={fontSize * 1.1 / scale}
+              fontSize={poseLabelFontSize * 1.1 / scale}
               fontWeight={700}
               style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.6)', strokeWidth: 2.5 / scale }}
             >
@@ -925,50 +1113,123 @@ export default function PoseOverlay({
         )}
       </svg>
 
-      {showCoGCharts && leanSamples.length >= 2 && leanChartSeries ? (
-        <div className="absolute right-2 top-14 w-[320px] rounded-md border border-white/15 bg-black/45 p-2 backdrop-blur-sm">
-          <div
-            className="mb-1 font-semibold uppercase tracking-[0.08em] text-white/90"
-            style={{ fontSize: `${chartTitleFontSize}px` }}
-          >
-            Body Lean vs Time ({(BODY_LEAN_CHART_WINDOW_MS / 1000).toFixed(0)}s window)
-          </div>
-          <div className="flex items-center gap-2">
-            <div
-              className="w-9 font-semibold uppercase text-white/80"
-              style={{ fontSize: `${chartAxisFontSize}px` }}
-            >
-              Lean
-            </div>
-            <svg width={BODY_LEAN_CHART_WIDTH} height={BODY_LEAN_CHART_HEIGHT} className="rounded-sm bg-black/45">
-              <line
-                x1={0}
-                y1={leanChartSeries.zeroY}
-                x2={BODY_LEAN_CHART_WIDTH}
-                y2={leanChartSeries.zeroY}
-                stroke="rgba(255,255,255,0.18)"
-                strokeDasharray="3 3"
-              />
-              <path
-                d={leanChartSeries.d}
-                fill="none"
-                stroke="rgba(34,211,238,0.92)"
-                strokeWidth={1.8}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <text
-                x={BODY_LEAN_CHART_WIDTH - 4}
-                y={12}
-                textAnchor="end"
-                fill="rgba(255,255,255,0.82)"
-                fontSize={chartValueFontSize}
-                fontWeight={600}
+      {((showCoGCharts && leanSamples.length >= 2 && leanChartSeries) ||
+        (hasPlottedAngles && angleSamples.length >= 2 && angleChartSeries)) ? (
+        <div className="absolute right-2 top-14 flex w-[320px] flex-col gap-2">
+          {showCoGCharts && leanSamples.length >= 2 && leanChartSeries ? (
+            <div className="rounded-md border border-white/15 bg-black/45 p-2 backdrop-blur-sm">
+              <div
+                className="mb-1 font-semibold uppercase tracking-[0.08em] text-white/90"
+                style={{ fontSize: `${chartTitleFontSize}px` }}
               >
-                {`${leanChartSeries.latest.toFixed(1)}°`}
-              </text>
-            </svg>
-          </div>
+                Body Lean vs Time ({(BODY_LEAN_CHART_WINDOW_MS / 1000).toFixed(0)}s window)
+              </div>
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-9 font-semibold uppercase text-white/80"
+                  style={{ fontSize: `${chartAxisFontSize}px` }}
+                >
+                  Lean
+                </div>
+                <svg width={BODY_LEAN_CHART_WIDTH} height={BODY_LEAN_CHART_HEIGHT} className="rounded-sm bg-black/45">
+                  <line
+                    x1={0}
+                    y1={leanChartSeries.zeroY}
+                    x2={BODY_LEAN_CHART_WIDTH}
+                    y2={leanChartSeries.zeroY}
+                    stroke="rgba(255,255,255,0.18)"
+                    strokeDasharray="3 3"
+                  />
+                  <path
+                    d={leanChartSeries.d}
+                    fill="none"
+                    stroke="rgba(34,211,238,0.92)"
+                    strokeWidth={1.8}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <text
+                    x={BODY_LEAN_CHART_WIDTH - 4}
+                    y={12}
+                    textAnchor="end"
+                    fill="rgba(255,255,255,0.82)"
+                    fontSize={chartValueFontSize}
+                    fontWeight={600}
+                  >
+                    {`${leanChartSeries.latest.toFixed(1)}°`}
+                  </text>
+                </svg>
+              </div>
+            </div>
+          ) : null}
+
+          {hasPlottedAngles && angleSamples.length >= 2 && angleChartSeries ? (
+            <div className="rounded-md border border-white/15 bg-black/45 p-2 backdrop-blur-sm">
+              <div
+                className="mb-1 font-semibold uppercase tracking-[0.08em] text-white/90"
+                style={{ fontSize: `${chartTitleFontSize}px` }}
+              >
+                Joint Angles vs Time ({(ANGLE_CHART_WINDOW_MS / 1000).toFixed(0)}s window)
+              </div>
+              <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1">
+                {angleChartSeries.map((series) => (
+                  <div
+                    key={`angle-series-${series.id}`}
+                    className="inline-flex items-center gap-1.5 text-white/85"
+                    style={{ fontSize: `${chartValueFontSize}px` }}
+                  >
+                    <span
+                      className="inline-block h-2 w-2 rounded-full"
+                      style={{ backgroundColor: series.color }}
+                    />
+                    <span className="font-medium">{series.label}</span>
+                    <span className="text-white/70">
+                      {series.latest !== null ? `${series.latest.toFixed(0)}°` : '--'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <div
+                  className="flex h-[96px] w-9 flex-col justify-between text-right font-semibold text-white/70"
+                  style={{ fontSize: `${chartAxisFontSize}px` }}
+                >
+                  <span>180</span>
+                  <span>90</span>
+                  <span>0</span>
+                </div>
+                <svg width={ANGLE_CHART_WIDTH} height={ANGLE_CHART_HEIGHT} className="rounded-sm bg-black/45">
+                  {[0, 90, 180].map((value) => {
+                    const y = ANGLE_CHART_HEIGHT - (value / 180) * ANGLE_CHART_HEIGHT;
+                    return (
+                      <line
+                        key={`angle-grid-${value}`}
+                        x1={0}
+                        y1={y}
+                        x2={ANGLE_CHART_WIDTH}
+                        y2={y}
+                        stroke="rgba(255,255,255,0.14)"
+                        strokeDasharray={value === 90 ? '3 3' : '2 4'}
+                      />
+                    );
+                  })}
+                  {angleChartSeries.map((series) =>
+                    series.d ? (
+                      <path
+                        key={`angle-path-${series.id}`}
+                        d={series.d}
+                        fill="none"
+                        stroke={series.color}
+                        strokeWidth={1.8}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    ) : null
+                  )}
+                </svg>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
